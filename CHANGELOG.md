@@ -8,9 +8,24 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 ## Unreleased
 
-[Compare v1.8.0...main](https://github.com/vekien/xi-tools/compare/v1.8.0...main)
+[Compare v1.8.1...main](https://github.com/vekien/xi-tools/compare/v1.8.1...main)
 
 _Nothing yet._
+
+---
+
+## v1.8.1 — 2026-09-13
+
+[Compare v1.8.0...v1.8.1](https://github.com/vekien/xi-tools/compare/v1.8.0...v1.8.1)
+
+Hotfix for the 10 September 2026 retail update.
+
+- **Item DATs from the 10 September 2026 retail update decode again.** That update grew every item record from `0xC00` to `0x1400` bytes and widened the header (`flags` became a u32; the equipment layouts gained a pad after `races`), so anything that assumed `0xC00` read nothing from a patched client. The record stride is now detected per file (`xi.ui.items.xi_layout`) and every field offset is looked up for that file's format, so `xi ui items search/export/json/import/inject/icon` and `xi mv database` work unchanged against a legacy install and a current retail one — even side by side. New `xi ui items info` lists each item DAT with the format it detected. Import and inject write records in the DAT's own format; the string block they write now matches the client's real layout (text objects with the `0x1C` header, a number object for the article slot) instead of a packed form only this tool could read
+- New item table `ROM/387/13–14` (ids 30720–31743, `Items_7`) registered in the item CLI and the `xi mv database` registry (`items7`); skipped where it does not exist
+- `xi mv database` item documents carry `stride`, `strides` and `format`
+- Model-viewer lists: the Colibri Scythe (main-hand model 969, `ROM/387/15–21`, one DAT per race) added to `characters.json` for all seven races; `manifest.json` regenerated
+- Tests: `tests/test_items_layout.py` (no game files needed — synthetic records in both formats round-trip and the detector tells them apart) and `tests/test_items_reference.py` (Scorpion Harness, Kraken Club, Byakko's Haidate, Excalibur, Chocobo Bedding decode identically from a legacy and a retail install; set `FFXI_RETAIL_DIR` / `FFXI_LEGACY_DIR`, either may be absent)
+- Docs: `docs/retail/update_september_10_2026.md` — every DAT the update touched, what each one is, the record-format change field by field, the verified zone file-id formulas, and the item / dialog / event / Ambuscade content diff
 
 ---
 
