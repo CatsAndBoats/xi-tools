@@ -48,6 +48,7 @@ loads at boot, and deep dives into specific well-known DATs.
 | [dats.md](dats.md) | Known DAT locations by category (living document) |
 | [dats_boot.md](dats_boot.md) | Which DATs load at game boot |
 | [dat_ror1.md](dat_ror1.md) | ROR-1 text encoding used by `menu` DATs (mission/quest text) |
+| [retail/update_september_10_2026.md](retail/update_september_10_2026.md) | **Retail update 10 Sept 2026** — item records grew from `0xC00` to `0x1400` bytes with a wider header; every changed DAT identified, plus the content diff |
 
 ### Per-file deep dives
 

@@ -1,5 +1,12 @@
 # ROM/0/4.DAT - Fixed-Page Graphics Data
 
+> **Update (10 September 2026):** this file is the **JP general item table** (4096 item
+> records; `ROM/118/106.DAT` is the EN twin). The retail update grew every record from
+> `0xC00` to `0x1400` bytes (file size `0x1400000` = 20,971,520 bytes) and widened the
+> header. The layout below describes the **legacy** record; the field-by-field
+> differences are in [../retail/update_september_10_2026.md](../retail/update_september_10_2026.md),
+> and the decoder that handles both formats is `src/xi/ui/items/xi_layout.py`.
+
 **Path:** `ROM/0/4.DAT`  
 **Size:** 12,582,912 bytes (`0x00C00000`)  
 **Magic:** none  

@@ -145,7 +145,11 @@ uv run xi mv database --out D:\viewer\db --game "D:\FFXI\FINAL FANTASY XI"
 | `--game DIR` | `FFXI_DIR` | Game install to read |
 
 Writes one `<table>.<lang>.json` per table plus `manifest.json` (row counts, source
-DATs, timestamp). The viewer's *Assets → Database* page prefers these files and falls
+DATs, timestamp). Each item table document also records `stride` / `strides` (per part)
+and `format` — `legacy` for 0xC00-byte records, `retail` for the 0x1400-byte records
+retail has used since 10 September 2026 — which the viewer needs to find a row's block
+again for its icon. The stride is detected per file, so a legacy install and a retail
+install bake the same rows. The viewer's *Assets → Database* page prefers these files and falls
 back to decoding the DATs itself when they are missing.
 
 **Item tables** (`general`, `usable`, `puppet`, `armor`, `weapons`, `maze`, `monst1`,

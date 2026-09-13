@@ -26,6 +26,9 @@ from pathlib import Path
 
 import click
 
+from xi.ui.items.xi_layout import (
+    FORMAT_LEGACY, STRIDE_LEGACY, detect_stride, fields_for, format_for_stride,
+)
 from xi.xi_config import FFXI_DIR, XI_TOOLS_DIR
 
 # ── registry (keep in step with ui/js/database.js) ───────────────────────────
@@ -38,6 +41,9 @@ ITEM_TABLES = [
     ("weapons", "weapon", [("ROM/118/108.DAT", "ROM/0/6.DAT")]),
     ("maze", "maze", [("ROM/217/21.DAT", "ROM/217/20.DAT")]),
     ("monst1", "instinct", [("ROM/288/80.DAT", "ROM/288/79.DAT")]),
+    # Added by the 10 September 2026 retail update (ids 30720-31743); missing on
+    # a legacy install, which bake_items skips.
+    ("items7", "general", [("ROM/387/14.DAT", "ROM/387/13.DAT")]),
     ("roeObj", "roe", [("ROM/307/16.DAT", "ROM/307/15.DAT")]),
     ("items3", "instinctList", [("ROM/314/89.DAT", "ROM/314/89.DAT")]),
     ("monst2", "species", [("ROM/288/67.DAT", "ROM/288/66.DAT")]),
@@ -105,8 +111,22 @@ DMSG_TABLES = [
 ALL_KEYS = [t[0] for t in ITEM_TABLES] + [t[0] for t in DMSG_TABLES]
 LANGS = ("en", "jp")
 
-ITEM_BLOCK = 0xC00
+# Legacy record stride. Files are read with the stride ``detect_stride`` finds
+# (0xC00 legacy / 0x1400 retail Sept 2026); this constant is only the fallback
+# the JSON reports when no part exists.
+ITEM_BLOCK = STRIDE_LEGACY
 ICON_OFFSET = 0x280
+
+# xi_layout field name -> viewer/JSON key (camelCase, as ui/js/database.js emits).
+_FIELD_KEYS = {
+    "id": "id", "flags": "flags", "stack": "stack", "type": "type", "resource_id": "resourceId",
+    "targets": "targets", "level": "level", "slots": "slots", "races": "races", "jobs": "jobs",
+    "superior_level": "superiorLevel", "shield_size": "shieldSize", "max_charges": "maxCharges",
+    "cast_time": "castTime", "use_delay": "useDelay", "reuse_delay": "reuseDelay",
+    "item_level": "itemLevel", "dmg": "damage", "delay": "delay", "dps": "dps", "skill": "skill",
+    "jug_size": "jugSize", "base_item_id": "baseItemId", "puppet_slot": "puppetSlot",
+    "element_charge": "elementCharge", "instinct_cost": "instinctCost",
+}
 ITEM_LAYOUTS = {"general", "usable", "puppet", "armor", "weapon", "maze", "instinct", "roe"}
 EN_SUBS = ["name", "article", "logName", "logPlural", "description"]
 JP_SUBS = ["name", "description"]
@@ -176,34 +196,22 @@ def find_string_block(block: bytes):
     return None
 
 
-def read_header(block: bytes, layout: str) -> dict:
-    h = {
-        "id": u32(block, 0x00), "flags": u16(block, 0x04), "stack": u16(block, 0x06),
-        "type": u16(block, 0x08), "resourceId": u16(block, 0x0A), "targets": u16(block, 0x0C),
-    }
-    if layout in ("armor", "weapon"):
-        h.update(level=u16(block, 0x0E), slots=u16(block, 0x10), races=u16(block, 0x12),
-                 jobs=u32(block, 0x14), superiorLevel=u16(block, 0x18))
-    if layout == "armor":
-        h.update(shieldSize=u16(block, 0x1A), maxCharges=u16(block, 0x1C), castTime=u16(block, 0x1E),
-                 useDelay=u16(block, 0x20), reuseDelay=u16(block, 0x22), itemLevel=u16(block, 0x26))
-    elif layout == "weapon":
-        h.update(damage=u16(block, 0x1C), delay=u16(block, 0x1E), dps=u16(block, 0x20),
-                 skill=block[0x22], jugSize=block[0x23], maxCharges=u16(block, 0x28),
-                 castTime=u16(block, 0x2A), useDelay=u16(block, 0x2C), reuseDelay=u16(block, 0x2E),
-                 baseItemId=u16(block, 0x30), itemLevel=u16(block, 0x32))
-    elif layout == "usable":
-        h["castTime"] = u16(block, 0x0E)
-    elif layout == "puppet":
-        h.update(puppetSlot=u16(block, 0x0E), elementCharge=u32(block, 0x10))
-    elif layout == "instinct":
-        h.update(level=u16(block, 0x0E), instinctCost=u16(block, 0x18))
+def read_header(block: bytes, layout: str, fmt: str = FORMAT_LEGACY) -> dict:
+    """Typed header fields of a decoded block, keyed the way the viewer names
+    them. Offsets come from ``xi_layout.FIELDS`` for the record format ``fmt``
+    ('legacy' 0xC00 / 'retail' 0x1400) so both installs decode identically."""
+    fields = fields_for(layout if layout in ("general", "usable", "puppet", "armor", "weapon",
+                                             "maze", "instinct", "roe") else "general", fmt)
+    h = {}
+    for name, (off, sfmt) in fields.items():
+        if off + struct.calcsize(sfmt) <= len(block):
+            h[_FIELD_KEYS.get(name, name)] = struct.unpack_from(sfmt, block, off)[0]
     return h
 
 
-def raw_item_row(block: bytes, layout: str, lang: str):
+def raw_item_row(block: bytes, layout: str, lang: str, fmt: str = FORMAT_LEGACY):
     if layout in ITEM_LAYOUTS:
-        h = read_header(block, layout)
+        h = read_header(block, layout, fmt)
         sb = find_string_block(block)
         if not sb:
             return None
@@ -228,25 +236,35 @@ def raw_item_row(block: bytes, layout: str, lang: str):
 
 
 def bake_items(game: Path, key: str, layout: str, parts, lang: str):
+    """Decode every part of an item table. The record stride is detected per
+    file (legacy 0xC00 / retail 0x1400) and reported as ``strides`` so the
+    viewer can locate a row's block in the DAT it later reads for the icon."""
     rows = []
     blocks = 0
     files = []
+    strides = []
     for part, (en, jp) in enumerate(parts):
         rel = jp if lang == "jp" else en
         path = game / rel
         files.append(rel)
         if not path.is_file():
+            strides.append(None)
             continue
         data = path.read_bytes()
-        count = len(data) // ITEM_BLOCK
+        stride = detect_stride(data)
+        strides.append(stride)
+        fmt = format_for_stride(stride)
+        count = len(data) // stride
         blocks += count
         for idx in range(count):
-            block = decode_block(data[idx * ITEM_BLOCK:(idx + 1) * ITEM_BLOCK])
-            raw = raw_item_row(block, layout, lang)
+            block = decode_block(data[idx * stride:(idx + 1) * stride])
+            raw = raw_item_row(block, layout, lang, fmt)
             if raw is not None:
                 rows.append({"idx": idx, "part": part, "raw": raw})
+    present = [st for st in strides if st]
     return {"kind": "items", "key": key, "lang": lang, "layout": layout, "files": files,
-            "blocks": blocks, "rows": rows}
+            "blocks": blocks, "stride": present[0] if present else ITEM_BLOCK, "strides": strides,
+            "format": format_for_stride(present[0]) if present else FORMAT_LEGACY, "rows": rows}
 
 
 def dmsg_subs(blk: bytes):

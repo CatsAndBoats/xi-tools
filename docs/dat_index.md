@@ -61,10 +61,11 @@ For the full evidence-based map see [dats.md](dats.md); for what loads at boot s
 ### ROM/0/0.DAT
 * `syst` — system core. (ffxi-hd overrides it.)
 
-### ROM/0/4.DAT … ROM/0/8.DAT
-* No magic. Fixed-page graphics/system data (4096 records × 0xC00 bytes).
-* Precompiled low-level boot/UI render data — **not** editable as textures.
-* Detail: [dats/ROM_0_4.md](dats/ROM_0_4.md)
+### ROM/0/4.DAT … ROM/0/9.DAT
+* No magic. The **JP item tables** (general, usable, weapons, armor, puppet, gil): fixed-size
+  records — 0xC00 bytes on a legacy install, **0x1400 since the 10 September 2026 retail
+  update** — each byte rotated right 5. EN twins live in `ROM/118/106–110` and `ROM/174/48`.
+* Detail: [dats/ROM_0_4.md](dats/ROM_0_4.md), [retail/update_september_10_2026.md](retail/update_september_10_2026.md)
 
 ### FTABLE/VTABLE pairs (ROM, ROM2…ROM10)
 * The model file lookup tables. `FTABLE` = path bits, `VTABLE` = ROM index.

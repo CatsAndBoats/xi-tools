@@ -1,7 +1,9 @@
 """``xi ui items`` — search and export FFXI item DATs.
 
 Reads binary item DATs directly from FFXI_DIR. Cipher: rotate-left-3 per byte.
-Record stride: 0xC00. Text section offset varies by item type.
+Record stride is detected per file — 0xC00 on a legacy install, 0x1400 on
+retail since the 10 September 2026 update — so every command here works
+against either (``xi ui items info`` shows what was detected).
 
 Item types and DAT ranges:
   general     0       - 4095    ROM/118/106.DAT
@@ -9,8 +11,9 @@ Item types and DAT ranges:
   puppet      8192    - 8703    ROM/118/110.DAT
   armor       10240   - 28671   ROM/118/109.DAT + ROM/286/73.DAT
   weapon      16384   - 23039   ROM/118/108.DAT
+  items 7     30720   - 31743   ROM/387/14.DAT   (retail Sept 2026+, placeholders so far)
   mount       model + key item + name strings (separate system)
-  custom      30720   - 57343   ROM/288/80.DAT
+  custom      29696   - 30719   ROM/288/80.DAT   (the Monstrosity instinct table's free slots)
 """
 
 import io
@@ -22,11 +25,12 @@ from pathlib import Path
 import click
 
 from xi.ui.items.xi_parser import (
-    ITEM_DATS, STRIDE, TEXT_OFFSETS, TYPE_NAME,
-    parse_dat, _decrypt, _encrypt,
+    ITEM_DATS, STRIDE, TEXT_OFFSETS, TYPE_NAME, ItemDat,
+    parse_dat, record_count, _decrypt, _encrypt, _read_strings, _resolve_text_offset,
     decode_flags, decode_jobs, encode_flags, encode_jobs,
     _patch_record, build_record,
 )
+from xi.ui.items.xi_layout import ICON_OFFSET, ICON_DATA, describe, detect_stride_path
 from xi.xi_config import FFXI_DIR, output_path_for
 
 _STUB = 'Not yet implemented.'
@@ -46,7 +50,7 @@ def _write_export(data: list, path: Path, label: str) -> None:
 # ── Shared helpers ─────────────────────────────────────────────────────────────
 
 _SPLIT_GROUPS = {
-    'items':      ['Items_1', 'Items_2', 'Items_3', 'Items_4', 'Items_5', 'Items_6'],
+    'items':      ['Items_1', 'Items_2', 'Items_3', 'Items_4', 'Items_5', 'Items_6', 'Items_7'],
     'consumable': ['Consumable'],
     'puppet':     ['Puppet'],
     'armor':      ['Armor_1', 'Armor_2'],
@@ -54,6 +58,10 @@ _SPLIT_GROUPS = {
     'custom':     ['Monstrosity_1', 'Monstrosity_2'],
     'misc':       ['Moblin', 'RoE_Objectives', 'RoE_Categories', 'Gil'],
 }
+
+
+def _dat_path(en_rom: str) -> Path:
+    return Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
 
 
 def _item_to_dict(item):
@@ -71,7 +79,7 @@ def _iter_all_dats(type_filter=None):
     for cat_name, base_id, item_type, en_rom, jp_rom in ITEM_DATS:
         if type_filter is not None and item_type != type_filter:
             continue
-        en_path = Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
+        en_path = _dat_path(en_rom)
         if not en_path.exists():
             continue
         click.echo(f'Processing {cat_name}: {en_path}', err=True)
@@ -84,6 +92,55 @@ def _iter_all_dats(type_filter=None):
 def group():
     """Item DAT operations — search across all types, or drill into a specific type."""
     pass
+
+
+@group.command('info')
+@click.option('--as-json', is_flag=True, help='Output as JSON.')
+def info_cmd(as_json):
+    """Show every item DAT under FFXI_DIR with its detected record format.
+
+    Legacy installs use 0xC00-byte records; retail since 10 September 2026
+    uses 0x1400-byte records with a wider header. Detection is per file, so a
+    mixed install (a retail DAT dropped into a legacy client) shows as mixed.
+
+    \b
+    Examples:
+      xi ui items info
+      xi ui items info --as-json
+    """
+    rows = []
+    for cat_name, base_id, item_type, en_rom, jp_rom in ITEM_DATS:
+        for lang, rom in (('en', en_rom), ('jp', jp_rom)):
+            if lang == 'jp' and jp_rom == en_rom:
+                continue
+            p = _dat_path(rom)
+            row = {'category': cat_name, 'lang': lang, 'dat': rom, 'base_id': base_id,
+                   'type': TYPE_NAME.get(item_type, str(item_type))}
+            if not p.exists():
+                row.update(exists=False, format=None, stride=None, records=0)
+            else:
+                try:
+                    stride = detect_stride_path(p)
+                    row.update(exists=True, stride=stride, format=describe(stride).split(' ')[0],
+                               records=p.stat().st_size // stride)
+                except ValueError as e:
+                    row.update(exists=True, stride=None, format=f'unknown ({e})', records=0)
+            rows.append(row)
+
+    if as_json:
+        click.echo(json.dumps(rows, indent=2))
+        return
+    formats = {r['format'] for r in rows if r['exists'] and r['format']}
+    click.echo(f'FFXI_DIR: {FFXI_DIR}')
+    click.echo('Install: ' + (', '.join(sorted(formats)) if formats else 'no item DATs found')
+               + ('  (MIXED — DATs from two client versions)' if len(formats) > 1 else ''))
+    click.echo(f'{"category":<15} {"lang":<4} {"dat":<18} {"format":<8} {"stride":>7} {"records":>8}')
+    for r in rows:
+        if not r['exists']:
+            click.echo(f'{r["category"]:<15} {r["lang"]:<4} {r["dat"]:<18} {"missing":<8}')
+            continue
+        click.echo(f'{r["category"]:<15} {r["lang"]:<4} {r["dat"]:<18} {r["format"]:<8} '
+                   f'{(r["stride"] and hex(r["stride"])) or "-":>7} {r["records"]:>8}')
 
 
 @group.command('search')
@@ -174,12 +231,18 @@ def icon_grp():
 
 
 def _find_item_dat(item_id: int):
-    """Return (cat_name, base_id, item_type, en_path, idx) or raise ClickException."""
+    """Return (cat_name, base_id, item_type, en_path, idx) or raise ClickException.
+
+    Record counts come from the detected stride, so the id → DAT resolution is
+    the same on a legacy and a retail install."""
     for cat_name, base_id, item_type, en_rom, jp_rom in ITEM_DATS:
-        en_path = Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
+        en_path = _dat_path(en_rom)
         if not en_path.exists():
             continue
-        n_records = en_path.stat().st_size // STRIDE
+        try:
+            n_records = record_count(en_path)
+        except ValueError:
+            continue
         if base_id <= item_id < base_id + n_records:
             return cat_name, base_id, item_type, en_path, item_id - base_id
     raise click.ClickException(f'Item ID {item_id} not found in any known DAT.')
@@ -206,19 +269,17 @@ def icon_export_cmd(item_id, output, as_bmp):
         raise click.ClickException('Pillow is required: pip install pillow')
 
     cat_name, base_id, item_type, en_path, idx = _find_item_dat(item_id)
-    rec_off = idx * STRIDE
-    click.echo(f'Processing {cat_name}: {en_path}  (record {idx})', err=True)
+    dat = ItemDat.load(en_path)
+    click.echo(f'Processing {cat_name}: {en_path}  (record {idx}, {describe(dat.stride)})', err=True)
 
-    raw = en_path.read_bytes()
-    dec = _decrypt(raw)
-
-    icon_size = struct.unpack_from('<I', dec, rec_off + 0x280)[0]
+    rec = dat.record(idx)
+    icon_size = struct.unpack_from('<I', rec, ICON_OFFSET)[0]
     if icon_size == 0:
         raise click.ClickException(f'Item {item_id} has no icon (size=0).')
-    if 0x284 + icon_size > STRIDE:
+    if ICON_DATA + icon_size > dat.stride:
         raise click.ClickException(f'Icon size {icon_size} exceeds record bounds.')
 
-    bmp_bytes = dec[rec_off + 0x284:rec_off + 0x284 + icon_size]
+    bmp_bytes = rec[ICON_DATA:ICON_DATA + icon_size]
 
     ext = 'bmp' if as_bmp else 'png'
     out = Path(output) if output else Path(f'item_{item_id}.{ext}')
@@ -253,15 +314,15 @@ def icon_import_cmd(item_id, png_file, dry_run):
         raise click.ClickException('Pillow is required: pip install pillow')
 
     cat_name, base_id, item_type, en_path, idx = _find_item_dat(item_id)
-    rec_off = idx * STRIDE
-    click.echo(f'Found item {item_id} in {cat_name}: {en_path}  (record {idx})', err=True)
+    dat = ItemDat.load(en_path)
+    click.echo(f'Found item {item_id} in {cat_name}: {en_path}  (record {idx}, {describe(dat.stride)})', err=True)
 
     img = Image.open(png_file).resize((32, 32)).convert('RGBA')
     buf = io.BytesIO()
     img.save(buf, format='BMP')
     bmp_bytes = buf.getvalue()
 
-    max_icon_size = STRIDE - 0x284
+    max_icon_size = dat.icon_capacity
     if len(bmp_bytes) > max_icon_size:
         raise click.ClickException(
             f'BMP too large: {len(bmp_bytes)} bytes > max {max_icon_size}. '
@@ -271,19 +332,18 @@ def icon_import_cmd(item_id, png_file, dry_run):
         click.echo(f'Dry run: would write {len(bmp_bytes)}-byte BMP at record+0x284.')
         return
 
-    raw = en_path.read_bytes()
-    dec = bytearray(_decrypt(raw))
-
-    old_icon_size = struct.unpack_from('<I', dec, rec_off + 0x280)[0]
-    struct.pack_into('<I', dec, rec_off + 0x280, len(bmp_bytes))
-    dec[rec_off + 0x284:rec_off + 0x284 + len(bmp_bytes)] = bmp_bytes
+    rec = bytearray(dat.record(idx))
+    old_icon_size = struct.unpack_from('<I', rec, ICON_OFFSET)[0]
+    struct.pack_into('<I', rec, ICON_OFFSET, len(bmp_bytes))
+    rec[ICON_DATA:ICON_DATA + len(bmp_bytes)] = bmp_bytes
     if old_icon_size > len(bmp_bytes):
-        tail = rec_off + 0x284 + len(bmp_bytes)
-        dec[tail:rec_off + 0x284 + old_icon_size] = b'\x00' * (old_icon_size - len(bmp_bytes))
+        tail = ICON_DATA + len(bmp_bytes)
+        rec[tail:ICON_DATA + old_icon_size] = b'\x00' * (old_icon_size - len(bmp_bytes))
+    dat.set_record(idx, bytes(rec))
 
     out_path = output_path_for(en_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(_encrypt(bytes(dec)))
+    out_path.write_bytes(dat.encrypted())
     click.echo(f'Icon updated ({len(bmp_bytes)} bytes) -> {out_path}')
 
 
@@ -295,6 +355,17 @@ def _make_type_group(name, description, type_id=None, dats=None):
         pass
     grp.__doc__ = description
 
+    def _dats_for_group():
+        for cat_name, base_id, item_type, en_rom, jp_rom in ITEM_DATS:
+            if dats and cat_name not in dats:
+                continue
+            if type_id is not None and item_type != type_id:
+                continue
+            en_path = _dat_path(en_rom)
+            if not en_path.exists():
+                continue
+            yield cat_name, base_id, item_type, en_rom, jp_rom, en_path
+
     @grp.command('search')
     @click.argument('query')
     @click.option('--exact', is_flag=True)
@@ -302,14 +373,7 @@ def _make_type_group(name, description, type_id=None, dats=None):
     def search_cmd(query, exact, as_json):
         f"""Search for a {name} item by name."""
         results = []
-        for cat_name, base_id, item_type, en_rom, jp_rom in ITEM_DATS:
-            if dats and cat_name not in dats:
-                continue
-            if type_id is not None and item_type != type_id:
-                continue
-            en_path = Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
-            if not en_path.exists():
-                continue
+        for cat_name, base_id, item_type, en_rom, jp_rom, en_path in _dats_for_group():
             click.echo(f'Processing {cat_name}: {en_path}', err=True)
             for item in parse_dat(FFXI_DIR, cat_name, base_id, item_type, en_rom, jp_rom):
                 match = (item.name.lower() == query.lower()) if exact else (query.lower() in item.name.lower())
@@ -335,14 +399,7 @@ def _make_type_group(name, description, type_id=None, dats=None):
         Default output: exports/ui/items/{name}.json
         """
         results = []
-        for cat_name, base_id, item_type, en_rom, jp_rom in ITEM_DATS:
-            if dats and cat_name not in dats:
-                continue
-            if type_id is not None and item_type != type_id:
-                continue
-            en_path = Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
-            if not en_path.exists():
-                continue
+        for cat_name, base_id, item_type, en_rom, jp_rom, en_path in _dats_for_group():
             click.echo(f'Processing {cat_name}: {en_path}', err=True)
             for item in parse_dat(FFXI_DIR, cat_name, base_id, item_type, en_rom, jp_rom):
                 d = _item_to_dict(item)
@@ -365,9 +422,9 @@ def _make_type_group(name, description, type_id=None, dats=None):
 
         Includes all parsed fields (name, flags, jobs, dmg/delay/dps/skill, …)
         plus ``dat`` / ``dat_ui`` (source DAT), ``record_index`` (slot in the DAT),
-        and ``header_hex`` (the raw decrypted record header — note the client item
-        DAT does not store a 3D model/file id; gear model ids live in the server's
-        item_equipment table).
+        ``format`` (legacy / retail record layout) and ``header_hex`` (the raw
+        decrypted record header — note the client item DAT does not store a 3D
+        model/file id; gear model ids live in the server's item_equipment table).
 
         \b
         Default output: {_EXPORT_ROOT}/{name}s/all.json
@@ -380,23 +437,15 @@ def _make_type_group(name, description, type_id=None, dats=None):
         """
         import base64
         results = []
-        for cat_name, base_id, item_type, en_rom, jp_rom in ITEM_DATS:
-            if dats and cat_name not in dats:
-                continue
-            if type_id is not None and item_type != type_id:
-                continue
-            en_path = Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
-            if not en_path.exists():
-                continue
+        for cat_name, base_id, item_type, en_rom, jp_rom, en_path in _dats_for_group():
             click.echo(f'Processing {cat_name}: {en_path}', err=True)
-            en_dec = _decrypt(en_path.read_bytes()) if header_bytes > 0 else b''
+            dat = ItemDat.load(en_path) if header_bytes > 0 else None
             for item in parse_dat(FFXI_DIR, cat_name, base_id, item_type, en_rom, jp_rom):
                 d = _item_to_dict(item)  # pops icon_data; adds flags_decoded / jobs_list
                 idx = item.id - base_id
                 d['record_index'] = idx
-                if header_bytes > 0:
-                    rec_off = idx * STRIDE
-                    d['header_hex'] = en_dec[rec_off:rec_off + header_bytes].hex()
+                if dat is not None:
+                    d['header_hex'] = dat.record(idx)[:header_bytes].hex()
                 if icons and item.icon_data:
                     d['icon_data'] = base64.b64encode(item.icon_data).decode('ascii')
                 results.append(d)
@@ -415,6 +464,7 @@ def _make_type_group(name, description, type_id=None, dats=None):
         Accepts the format produced by ``export``. Only fields present in each
         entry are written; unspecified fields are left untouched.
         ``jobs_list`` rebuilds ``jobs``; ``flags_decoded`` rebuilds ``flags``.
+        Field offsets follow the DAT's own record format (legacy or retail).
 
         \b
         Examples:
@@ -432,13 +482,8 @@ def _make_type_group(name, description, type_id=None, dats=None):
             if not isinstance(item_id, int):
                 click.echo(f'  skip entry (no id): {entry}', err=True)
                 continue
-            for cat_name_dat, base_id, item_type_dat, en_rom, jp_rom in ITEM_DATS:
-                if dats and cat_name_dat not in dats:
-                    continue
-                en_path = Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
-                if not en_path.exists():
-                    continue
-                n_records = en_path.stat().st_size // STRIDE
+            for cat_name_dat, base_id, item_type_dat, en_rom, jp_rom, en_path in _dats_for_group():
+                n_records = record_count(en_path)
                 if base_id <= item_id < base_id + n_records:
                     by_dat.setdefault((cat_name_dat, en_rom, item_type_dat), []).append(
                         (item_id - base_id, entry))
@@ -446,21 +491,20 @@ def _make_type_group(name, description, type_id=None, dats=None):
 
         total = 0
         for (cat_name_dat, en_rom, item_type_dat), patches in by_dat.items():
-            en_path = Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
-            click.echo(f'Processing {cat_name_dat}: {en_path}', err=True)
-            raw = en_path.read_bytes()
-            dec = bytearray(_decrypt(raw))
+            en_path = _dat_path(en_rom)
+            dat = ItemDat.load(en_path)
+            click.echo(f'Processing {cat_name_dat}: {en_path}  ({describe(dat.stride)})', err=True)
             for idx, entry in patches:
-                rec_view = bytearray(dec[idx * STRIDE:(idx + 1) * STRIDE])
-                _patch_record(rec_view, dict(entry), item_type_dat)
-                dec[idx * STRIDE:(idx + 1) * STRIDE] = rec_view
+                rec_view = bytearray(dat.record(idx))
+                _patch_record(rec_view, dict(entry), item_type_dat, dat.format)
+                dat.set_record(idx, bytes(rec_view))
                 if dry_run:
                     click.echo(f'  dry-run: would patch id={entry["id"]}')
                 total += 1
             if not dry_run:
                 out_path = output_path_for(en_path)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(_encrypt(bytes(dec)))
+                out_path.write_bytes(dat.encrypted())
                 click.echo(f'  wrote {out_path}')
 
         msg = f'{"Would patch" if dry_run else "Patched"} {total} item(s).'
@@ -478,6 +522,7 @@ def _make_type_group(name, description, type_id=None, dats=None):
 
         The first DAT in the {name} group is used. Free slots (empty name) are
         filled in order; an error is raised if there are not enough free slots.
+        New records are built in the DAT's own format (legacy or retail).
 
         \b
         Example entry:
@@ -504,33 +549,20 @@ def _make_type_group(name, description, type_id=None, dats=None):
             resolved.append(e)
 
         # Find the first usable DAT in this group
-        target = None
-        for cat_name_dat, base_id, item_type_dat, en_rom, jp_rom in ITEM_DATS:
-            if dats and cat_name_dat not in dats:
-                continue
-            en_path = Path(FFXI_DIR) / Path(en_rom.replace('/', '\\'))
-            if en_path.exists():
-                target = (cat_name_dat, base_id, item_type_dat, en_rom, en_path)
-                break
-
+        target = next(_dats_for_group(), None)
         if target is None:
             raise click.ClickException(f'No accessible DAT found for group {name!r}.')
 
-        cat_name_dat, base_id, item_type_dat, en_rom, en_path = target
-        click.echo(f'Processing {cat_name_dat}: {en_path}', err=True)
-
-        raw = en_path.read_bytes()
-        dec = bytearray(_decrypt(raw))
-        n_records = len(dec) // STRIDE
+        cat_name_dat, base_id, item_type_dat, en_rom, jp_rom, en_path = target
+        dat = ItemDat.load(en_path)
+        click.echo(f'Processing {cat_name_dat}: {en_path}  ({describe(dat.stride)})', err=True)
 
         # Collect free slot indices (empty name)
         free_slots = []
-        for idx in range(n_records):
-            rec = dec[idx * STRIDE:(idx + 1) * STRIDE]
-            # A slot is free if its name is empty or '.'
-            from xi.ui.items.xi_parser import _read_strings, TEXT_OFFSETS
-            text_off = TEXT_OFFSETS.get(item_type_dat, 0x18)
-            strings = _read_strings(bytes(rec), text_off)
+        for idx in range(dat.count):
+            rec = dat.record(idx)
+            text_off = _resolve_text_offset(rec, item_type_dat, dat.format)
+            strings = _read_strings(rec, text_off) if text_off is not None else []
             if not strings or not strings[0] or strings[0] == '.':
                 free_slots.append(idx)
             if len(free_slots) >= len(resolved):
@@ -543,17 +575,17 @@ def _make_type_group(name, description, type_id=None, dats=None):
         injected = []
         for slot_idx, entry in zip(free_slots, resolved):
             item_id = base_id + slot_idx
-            new_rec = bytearray(build_record(entry, item_type_dat))
+            new_rec = build_record(entry, item_type_dat, dat.format)
             if dry_run:
                 click.echo(f'  dry-run: would inject "{entry.get("name","")}" at id={item_id} (slot {slot_idx})')
             else:
-                dec[slot_idx * STRIDE:(slot_idx + 1) * STRIDE] = new_rec
+                dat.set_record(slot_idx, new_rec)
             injected.append(item_id)
 
         if not dry_run:
             out_path = output_path_for(en_path)
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_bytes(_encrypt(bytes(dec)))
+            out_path.write_bytes(dat.encrypted())
             click.echo(f'Injected {len(injected)} item(s) at IDs {injected} -> {out_path}')
         else:
             click.echo(f'Dry-run: would inject {len(injected)} item(s) at IDs {injected}.')
@@ -567,8 +599,8 @@ def _make_type_group(name, description, type_id=None, dats=None):
 
 
 group.add_command(_make_type_group(
-    'general',    'General items (IDs 0-4095).', type_id=0,
-    dats=['Items_1', 'Items_2', 'Items_3', 'Items_4', 'Items_5', 'Items_6']))
+    'general',    'General items (IDs 0-4095, 8704-10239, 30720-31743 and the small tables).', type_id=0,
+    dats=['Items_1', 'Items_2', 'Items_3', 'Items_4', 'Items_5', 'Items_6', 'Items_7']))
 group.add_command(_make_type_group(
     'consumable', 'Consumable items (IDs 4096-8191).', type_id=1,
     dats=['Consumable']))
@@ -582,7 +614,7 @@ group.add_command(_make_type_group(
     'weapon',     'Weapons (IDs 16384-23039).', type_id=4,
     dats=['Weapons']))
 group.add_command(_make_type_group(
-    'custom',     'Custom server items (IDs 30720-57343).',
+    'custom',     'Custom server items — free slots of the Monstrosity instinct table (IDs 29696-30719).',
     dats=['Monstrosity_1']))
 
 

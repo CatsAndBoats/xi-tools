@@ -319,7 +319,7 @@ UI textures, system files, cutscenes, zone maps, music, and more.
 
 | DAT | Doc | Summary |
 |---|---|---|
-| `ROM/0/4.DAT` | [dats/ROM_0_4.md](dats/ROM_0_4.md) | Fixed-page graphics/system data (4096×0xC00 records, no magic) |
+| `ROM/0/4.DAT` | [dats/ROM_0_4.md](dats/ROM_0_4.md) | JP general item table (4096 records × 0xC00 legacy / 0x1400 retail Sept 2026, no magic) |
 | `ROM/0/14–21.DAT` | [dats/ROM_0_14-21.md](dats/ROM_0_14-21.md) | 8 window background skins (`win0`, DXT tiles) |
 | `ROM/0/23.DAT` | [dats/ROM_0_23.md](dats/ROM_0_23.md) | Title screen scene — camera splines, weather sequence, zone references |
 | `ROM/0/24–26.DAT` | [dats/ROM_0_24.md](dats/ROM_0_24.md) | Character-select scene controllers (`sel_`) |

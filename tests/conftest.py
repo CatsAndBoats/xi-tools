@@ -1,19 +1,39 @@
-"""Shared fixtures: ``root`` = the game folder (FFXI_DIR from the environment or .env)."""
+"""Shared fixtures: ``root`` = the game folder (FFXI_DIR from the environment or .env).
+
+FFXI_LEGACY_DIR / FFXI_RETAIL_DIR (optional) point the item-format tests at a
+pre-September-2026 client and a current retail client respectively."""
 import os
 from pathlib import Path
 
 import pytest
 
 
+def _env_from_dotenv(key: str) -> str | None:
+    """``key`` from the environment, else from the repo ``.env``."""
+    d = os.environ.get(key)
+    if d:
+        return d
+    env = Path(__file__).resolve().parents[1] / ".env"
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip().strip('"')
+    return None
+
+
+def pytest_configure(config):
+    # Optional second installs for the item-format tests (tests/test_items_reference.py):
+    # a pre-September-2026 client (FFXI_LEGACY_DIR) and a current retail one
+    # (FFXI_RETAIL_DIR). Surface them from .env the same way FFXI_DIR is.
+    for key in ("FFXI_DIR", "FFXI_LEGACY_DIR", "FFXI_RETAIL_DIR"):
+        val = _env_from_dotenv(key)
+        if val and key not in os.environ:
+            os.environ[key] = val
+
+
 @pytest.fixture(scope="session")
 def root() -> Path:
-    d = os.environ.get("FFXI_DIR")
-    if not d:
-        env = Path(__file__).resolve().parents[1] / ".env"
-        if env.exists():
-            for line in env.read_text(encoding="utf-8").splitlines():
-                if line.startswith("FFXI_DIR="):
-                    d = line.split("=", 1)[1].strip().strip('"')
+    d = _env_from_dotenv("FFXI_DIR")
     if not d or not Path(d).exists():
         pytest.skip("FFXI_DIR (game folder) not available")
     return Path(d)
