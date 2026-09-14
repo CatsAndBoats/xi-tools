@@ -53,8 +53,9 @@ It walks you through, in order:
    same type — slot, model id, source folder (saved as `source_dir`), destination — so re-running just
    tweaks it, and gear re-uses each slot's destination block (overwrite in place).
 
-3. **Content type** — `Gear`, `Mounts`, `Entity (NPC / Monster / Object)`, or
-   `NPC (costume: race + gear + weapons)`.
+3. **Content type** — `Gear`, `Mounts`, `Entity (NPC / Monster / Object)`,
+   `NPC (costume: race + gear + weapons)`, or `Ability` (a recipe from the model
+   viewer's Ability Mixer or `xi ability recipe`).
 
 4. **Type-specific questions** (see below), then it writes the manifest action and offers
    to build (with a dry-run preview first).
@@ -126,6 +127,24 @@ zone NPC is separate — use the editor's **Custom NPCs** browser or the `custom
 See [../entity/npc-look.md](../entity/npc-look.md).
 
 ---
+
+### Ability (a composed job ability / spell / weapon skill)
+
+Point it at a **recipe** (`*.recipe.json`, [schema](../../schema/ability_recipe.json))
+— the wizard lists the ones under `exports/ability/` — then choose what to publish it
+as (auto reads it off the recipe: a `ws:` motion lane is a weapon skill, a `spell:` one
+a spell, else a job ability), the animation number (auto = the next free one) and the
+ROM10 folder. The recipe is copied to `projects/resources/ability/` and the build
+composes it, places the DAT(s) and registers the file id(s); the number it took is
+recorded on the action and the server SQL lands in `projects/server/abilities/`. The
+same action from arguments, with every parameter defaulted:
+
+```bash
+uv run xi dats prepare exports/ability/mixer/tiger_fury.recipe.json --project tiger_fury --replace
+uv run xi dats build tiger_fury --dry-run
+```
+
+Full detail: [../ability/mixer.md](../ability/mixer.md#publish).
 
 ## Building (`xi dats build`)
 
@@ -264,13 +283,13 @@ resource files that live next to the source JSON into `projects/resources/<type>
 
 | Command | What it does |
 |---|---|
-| `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity) at new model ids and write a manifest action |
+| `xi dats new` | **Interactive wizard** — place prebuilt DATs (gear/mount/entity/NPC) at new model ids, or publish an ability recipe, and write a manifest action |
 | `xi dats build [manifest]` | Build into the **base install** (`FFXI_DIR`), then `sync_pivot_from_base()` when a pivot is configured; `--dry-run` previews (no separate `plan` command) |
 | `xi dats package <project>` | Zip the project's built DATs + F/V tables (`--from dir`/`pivot`/`hd`, default `dir`) into `projects/packages/<project>.zip` (ROM-relative, XIPivot-ready) |
 | `xi dats release <project>` | Stage the project's DATs + full FTABLE/VTABLE set + patched `FFXiMain.dll` into `<release>\Game\FINAL FANTASY XI\…` (a launcher build folder). Prompts for the folder; `--to <path>`, `--no-dll` |
 | `xi dats undo <project>` | Reverse a build: delete the placed DATs + clear their file_id entries, then remove the manifest (`--keep-json` keeps it) |
 | `xi dats json [manifest]` | Print the normalized manifest JSON |
-| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set into `projects/resources` and add an action |
+| `xi dats prepare <source> [manifest]` | Copy an exported JSON/change-set/ability recipe into `projects/resources` and add an action (`--type`, and for abilities `--kind` / `--animation` / `--subdir`) |
 | `xi dats changelog [manifest]` | Table of each action's recorded inline `result` (model_id → file_id → DAT) |
 
 > Note: `new`/`build` write mesh/entity/gear/mount DATs + table patches into **`FFXI_DIR`**
@@ -288,6 +307,11 @@ Verbatim-placement types (written by `xi dats new`, built into the live target):
   (`entity.xi_bake_npc`, source `projects/custom/<project>.dat`).
 - `mount`: places the model DAT at the chosen path, writes EN/JP name/help + optional
   key-item d_msg overrides, registers the file_id, and emits a server snippet.
+- `ability`: composes a recipe (`xi.ability.xi_compose`) into one DAT (job ability /
+  spell) or body + two companion DATs per race (weapon skill), takes the animation
+  number against the live tables, places them under `ROM10/<subdir>/` and registers the
+  file ids; records kind / animation / placements on the action and emits the server
+  SQL to `projects/server/abilities/`. Needs no table expansion.
 
 GLB-rebuild / package types:
 
