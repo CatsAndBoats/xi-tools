@@ -29,6 +29,7 @@ from xi.entity.anim    import xi_export as anim_export
 from xi.entity.anim    import xi_import as anim_import
 from xi.entity.anim    import xi_schedule as anim_schedule
 from xi.entity.anim    import xi_ws as anim_ws
+from xi.ability  import cli as ability_cli
 from xi.entity.mesh    import xi_export as mesh_export
 from xi.entity.mesh    import xi_import as mesh_import
 from xi.dll.cli import dll_group
@@ -323,6 +324,7 @@ gear.add_command(_gear_recolor_alias,    'recolor')
 # ── dll (POL1 client modules: FFXiMain, polcore, app, …) ───────────────────
 
 cli.add_command(dll_group)
+cli.add_command(ability_cli.group, "ability")
 
 
 # ── ui ────────────────────────────────────────────────────────────────────────
