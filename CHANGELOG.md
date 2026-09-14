@@ -10,7 +10,8 @@ point at the GitHub compare view for anyone who wants the technical detail.
 
 [Compare v1.8.1...main](https://github.com/vekien/xi-tools/compare/v1.8.1...main)
 
-_Nothing yet._
+- **`xi anim export --split-anim`** writes every animation track in a DAT as its own file named after the track (`exports/anim/rom/27/82/idl0.gltf`, `wlk0.gltf`, …) instead of one `--anim` clip; with `--fbx` the lot is baked through a single Blender run
+- **`xi anim export --categories`** lays the output out as `<race>/<category>/<action>/` — `exports/anim/hume_male/sword/fast_blade/`, `galka/emote/emote/` — named from the viewer's character list with the FFXiMain.dll motion tables as the fallback; DATs neither knows (monsters, NPCs) go under `other/`. Works for a single DAT and for the no-DAT bulk export. The same lookup now also detects the race of animation-only DATs the ROM-id heuristic didn't know (weapon skills, job emotes, battle packs), so those export without `--race`
 
 ---
 

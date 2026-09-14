@@ -5,9 +5,12 @@ for editing in a DCC tool (Blender recommended).
 
 ```bash
 uv run xi anim export <dat> [--anim NAME] [--fbx] [--output DIR]
+                                       [--split-anim] [--categories]
                                        [--mesh [LOOK]] [--race NAME] [--skeleton-dat PATH]
 uv run xi anim export ROM/217/32 --anim idl
 uv run xi anim export rom/37/13 --anim poi --fbx        # emote (see emotes.md)
+uv run xi anim export ROM/27/82 --split-anim --fbx      # every track, one .fbx each
+uv run xi anim export ROM/76/30 --split-anim --categories   # → exports/anim/hume_male/sword/fast_blade/
 ```
 
 `<dat>` may be a filesystem path or a ROM-relative spec like `ROM/217/32`
@@ -41,7 +44,23 @@ Edit geometry with the mesh tools, not here — any mesh is reference only.
   now carries the **textures** too (unless `--no-tex`).
 - `--no-tex` — skip decoding the mesh textures. By default they're written as PNGs
   beside the glTF and wired into its materials; pass this for a geometry-only export.
-- `--output DIR` — override the output directory.
+- `--output DIR` — override the output directory (with `--categories`, the root the
+  `<race>/<category>/<action>/` tree is built under).
+- `--split-anim` — export **every** animation track in the DAT as its own file named
+  after the track (`idl0.gltf`, `wlk0.gltf`, `bow1.gltf` …) straight into
+  `exports/anim/<rom path>/` (no `<stem>_<anim>` folder). `--anim` is ignored; the
+  waist sibling of an emote is a different DAT and is not pulled in — export it too.
+  With `--fbx` every clip is baked through one Blender run.
+- `--categories` — lay the output out as `<race>/<category>/<action>/` instead of the
+  ROM path: `exports/anim/hume_male/sword/fast_blade/`, `galka/emote/emote/`,
+  `mithra/battle/battle_club_staff/`. Names are the viewer's character list
+  (`mv/lists/characters.json`: race label, action group, action label, snake-cased);
+  a PC motion DAT the list doesn't name falls back to the FFXiMain.dll motion tables
+  (`<race>/<category>/slot03`, or `ws017` for a weapon skill so its body and waist
+  clips share a folder); a DAT only ever listed as a companion keeps its ROM id as the
+  action (`sword/rom_100_77`); anything else — monsters, NPCs, DATs outside `FFXI_DIR`
+  — goes under `other/rom/<dir>/<file>/`. Usually paired with `--split-anim`; alone it
+  puts the one `<stem>_<anim>/` clip folder under the category path.
 - `--race NAME` — base race skeleton + mesh race for **animation-only** DATs (no
   skeleton of their own). **Auto-detected from the DAT id** (motion files are
   race-specific: `rom/37/13` IS HumeFemale's emote file, `rom/61/8` is Galka's) — you
@@ -76,10 +95,28 @@ exports/anim/rom/217/32/32_idl/Skin.png      # textures (unless --no-tex)
 and a **bare glTF name** you drop in that folder (`--layer yap.gltf`, or
 `import <dat> tlk yap.gltf`) is resolved here too.
 
+With `--split-anim` the tracks are the files:
+
+```
+exports/anim/rom/27/82/idl0.gltf
+exports/anim/rom/27/82/wlk0.gltf
+exports/anim/rom/27/82/run0.gltf …
+```
+
+and with `--categories` the ROM path becomes the race / category / action:
+
+```
+exports/anim/hume_male/sword/fast_blade/b000.gltf
+exports/anim/hume_male/battle/battle_club_staff/btl1.gltf
+exports/anim/galka/emote/emote/bow0.gltf
+exports/anim/other/rom/217/32/idl0.gltf        # a monster: not a PC motion DAT
+```
+
 > **Bulk mode:** omit `<dat>` entirely to export **every** track for **every** PC
 > race straight from the game (FFXiMain motion tables + FTABLE) into
-> `exports/anim/<Race>/<category>/…`. Scope with `--race` / `--category`; this is
-> texture-free by design (it would otherwise write a PNG per track across ~180k tracks).
+> `exports/anim/<Race>/<category>/…` (or the `--categories` tree above). Scope with
+> `--race` / `--category`; this is texture-free by design (it would otherwise write a
+> PNG per track across ~180k tracks).
 > Categories: `movement, emote, dance, action, fishing, battle, dwMain, dwOff,
 > weaponSkill, weaponSkillExt` — the last two are the primary (animations 0–255) and
 > extended (256–271) weapon-skill banks, each walked with its two companion blocks

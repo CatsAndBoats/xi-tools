@@ -1638,6 +1638,15 @@ def detect_race_from_dat(dat_path) -> Optional[str]:
     return None
 
 
+def _has_skeleton(dat_path: Path) -> bool:
+    """True if the DAT carries its own 0x29 skeleton (monster/NPC/race base)."""
+    try:
+        return any(s.type_code == SECTION_TYPE_SKELETON
+                   for s in parse_sections(read_path_for(dat_path).read_bytes()))
+    except (OSError, ValueError):
+        return False
+
+
 def resolve_mesh_look(mesh_value: Optional[str], race: str) -> List[Path]:
     """Turn the --mesh option into a list of body mesh DAT paths to attach.
 
@@ -1683,21 +1692,70 @@ def _safe_track_name(raw: str) -> str:
     return ''.join(c if (c.isalnum() or c in '-_') else '_' for c in name)
 
 
+def _track_stems(sections: Sequence[Section]) -> List[Tuple[Section, str]]:
+    """Every animation section of a DAT paired with a unique file stem (its track
+    name; a repeated name within one DAT gets ``_2``, ``_3`` …)."""
+    out: List[Tuple[Section, str]] = []
+    used: set = set()
+    for sec in sections:
+        if sec.type_code != SECTION_TYPE_SKELETON_ANIMATION:
+            continue
+        stem = _safe_track_name(sec.name)
+        if not stem:
+            continue
+        if stem in used:
+            k = 2
+            while f'{stem}_{k}' in used:
+                k += 1
+            stem = f'{stem}_{k}'
+        used.add(stem)
+        out.append((sec, stem))
+    return out
+
+
+def export_split(dat_path: Path, output_dir: Path, skeleton_dat: Optional[Path] = None,
+                 race: Optional[str] = None, mesh_dats: Optional[Sequence[Path]] = None,
+                 textures: bool = True) -> List[Path]:
+    """Export EVERY animation track of a DAT as its own glTF, named after the track
+    (``idl0.gltf``, ``wlk0.gltf`` …) directly in ``output_dir``. Returns the glTF
+    paths in DAT order."""
+    data = read_path_for(dat_path).read_bytes()
+    sections = parse_sections(data)
+    tracks = _track_stems(sections)
+    if not tracks:
+        raise ValueError(f"No animation tracks found in {Path(dat_path).name}.")
+    joints, globals_by_joint, primitives, vertices, tex = _resolve_skeleton_and_mesh(
+        data, sections, skeleton_dat, race, mesh_dats, want_textures=textures)
+    out: List[Path] = []
+    for sec, stem in tracks:
+        animation = parse_animation(data, sec)
+        gltf_path, _bin = build_gltf(dat_path, output_dir, joints, globals_by_joint,
+                                     primitives, vertices, animation, out_stem=stem,
+                                     textures=tex)
+        out.append(gltf_path)
+    return out
+
+
 def _export_all_races(fbx: bool, output: Optional[Path], race_filter: Optional[set],
                       category_filter: Optional[set], mesh, skip_existing: bool,
-                      limit: Optional[int]):
+                      limit: Optional[int], categories: bool = False):
     """Bulk-export every PC animation into a per-track tree, self-contained.
 
     Layout: ``<base>/<Race>/<category>/rom/<dir>/<file>/<track>.gltf`` (+ .fbx with
-    --fbx). The DAT list comes straight from FFXiMain.dll motion tables + FTABLE
-    (see :mod:`xi.entity.anim.xi_motion_tables`) — no external lists. The base
-    race skeleton (and any --mesh) is resolved once per race and reused across that
-    race's animation-only DATs.
+    --fbx), or with ``categories`` ``<base>/<race>/<category>/<action>/<track>.gltf``
+    (see :mod:`xi.entity.anim.xi_categories`). The DAT list comes straight from
+    FFXiMain.dll motion tables + FTABLE (see :mod:`xi.entity.anim.xi_motion_tables`)
+    — no external lists. The base race skeleton (and any --mesh) is resolved once
+    per race and reused across that race's animation-only DATs.
     """
     from xi.entity.anim.xi_motion_tables import enumerate_race_animations
     from xi.xi_config import XI_TOOLS_DIR, FFXI_DIR
 
     base = Path(output) if output else Path(XI_TOOLS_DIR) / 'exports' / 'anim'
+    cats = None
+    if categories:
+        from xi.entity.anim.xi_categories import MotionCategories
+        cats = MotionCategories()
 
     # Per-race cache of (joints, globals, primitives, vertices) for animation-only
     # DATs — they all rig against the same base race skeleton, so resolve it once.
@@ -1749,8 +1807,11 @@ def _export_all_races(fbx: bool, output: Optional[Path], race_filter: Optional[s
             n_dats += 1
 
             rel = spec[:-4] if spec.lower().endswith('.dat') else spec  # ROM/56/59
-            out_dir = base / race / category / rel.lower()              # .../rom/56/59
             dat_abs = Path(FFXI_DIR) / spec
+            if cats is not None:
+                out_dir = base / cats.dir_for(dat_abs, fallback=(race, category))
+            else:
+                out_dir = base / race / category / rel.lower()          # .../rom/56/59
             try:
                 data = read_path_for(dat_abs).read_bytes()
                 sections = parse_sections(data)
@@ -1765,19 +1826,7 @@ def _export_all_races(fbx: bool, output: Optional[Path], race_filter: Optional[s
                 _click.echo(f'skip {spec}: {e}', err=True)
                 continue
 
-            used: set = set()
-            for sec in sections:
-                if sec.type_code != SECTION_TYPE_SKELETON_ANIMATION:
-                    continue
-                stem = _safe_track_name(sec.name)
-                if not stem:
-                    continue
-                if stem in used:  # duplicate track name within one DAT folder
-                    k = 2
-                    while f'{stem}_{k}' in used:
-                        k += 1
-                    stem = f'{stem}_{k}'
-                used.add(stem)
+            for sec, stem in _track_stems(sections):
                 target = out_dir / f'{stem}.{"fbx" if fbx else "gltf"}'
                 if skip_existing and target.exists():
                     continue
@@ -1820,7 +1869,18 @@ def _export_all_races(fbx: bool, output: Optional[Path], race_filter: Optional[s
                     '(like `mesh export`); pass this for a geometry-only export.')
 @_click.option('--output', type=_click.Path(path_type=Path), default=None,
                help='Output directory (default: exports/anim/<rom path>/<stem>_<anim>; '
-                    'no-DAT bulk mode: exports/anim)')
+                    '--split-anim: exports/anim/<rom path>; --categories and no-DAT '
+                    'bulk mode: the exports/anim root the tree is built under)')
+@_click.option('--split-anim', 'split_anim', is_flag=True, default=False,
+               help='Export EVERY animation in the DAT as its own file named after '
+                    'the track (idl0.gltf, wlk0.gltf, …) instead of one --anim clip. '
+                    'Files land in exports/anim/<rom path>/ (or --output) directly.')
+@_click.option('--categories', is_flag=True, default=False,
+               help='Lay the output out as <race>/<category>/<action>/ — e.g. '
+                    'hume_male/sword/fast_blade/ — instead of the ROM path, named from '
+                    'the viewer\'s character list (mv/lists/characters.json) and the '
+                    'FFXiMain.dll motion tables. DATs neither knows go under other/. '
+                    'In bulk mode this replaces the <Race>/<category>/rom/… tree.')
 @_click.option('--race', default=None,
                help='Base race skeleton / mesh for animation-only DATs. Auto-detected '
                     'from the DAT id (rom/37/13 → HumeFemale); pass to override. '
@@ -1845,12 +1905,16 @@ def _export_all_races(fbx: bool, output: Optional[Path], race_filter: Optional[s
                     '--mesh ID,ID,ID,ID,ID,ID = a "look" of gear model ids for '
                     'face,head,body,hands,legs,feet (missing slots default to 0). '
                     'Also accepts DAT path(s) or a race name.')
-def cmd(dat_path: Optional[str], anim: str, fbx: bool, no_tex: bool, output, race: str, category,
-        skip_existing, limit, skeleton_dat, mesh):
+def cmd(dat_path: Optional[str], anim: str, fbx: bool, no_tex: bool, output, split_anim: bool,
+        categories: bool, race: str, category, skip_existing, limit, skeleton_dat, mesh):
     """Export mesh + skeleton + animation from a DAT to glTF 2.0.
 
     DAT_PATH may be a filesystem path or a ROM-relative spec like ROM/217/32.
     Pass --fbx to also emit an animated .fbx (baked via Blender) for DCC tools.
+
+    --split-anim writes every track in the DAT as its own file named after the
+    track (exports/anim/rom/27/82/idl0.gltf, wlk0.gltf, …). --categories swaps the
+    ROM path for <race>/<category>/<action>/ (exports/anim/hume_male/sword/fast_blade/).
 
     Omit DAT_PATH to BULK-export every animation for every PC race into a per-track
     tree — exports/anim/<Race>/<category>/rom/<dir>/<file>/<track>.fbx —
@@ -1885,7 +1949,7 @@ def cmd(dat_path: Optional[str], anim: str, fbx: bool, no_tex: bool, output, rac
                     f"choose from {', '.join(MOTION_CATEGORY_HINTS)}.")
             category_filter = cats
         _export_all_races(fbx, output, race_filter, category_filter, mesh,
-                          skip_existing, limit)
+                          skip_existing, limit, categories=categories)
         return
 
     from xi.entity.mesh.xi_export import resolve_dat_path
@@ -1894,6 +1958,11 @@ def cmd(dat_path: Optional[str], anim: str, fbx: bool, no_tex: bool, output, rac
         skel = resolve_dat_path(str(skeleton_dat)) if skeleton_dat is not None else None
         if race is None:
             race = detect_race_from_dat(dat)
+            if race is None and skel is None and not _has_skeleton(dat):
+                # Not a base/emote file by id: ask the character list + DLL motion
+                # tables (weapon skills, job emotes, battle packs …).
+                from xi.entity.anim.xi_categories import MotionCategories
+                race = MotionCategories().race_for(dat)
             if race:
                 _click.echo(f'Detected race: {race}')
             # No race detected → leave it unset. A DAT with its own skeleton
@@ -1905,7 +1974,43 @@ def cmd(dat_path: Optional[str], anim: str, fbx: bool, no_tex: bool, output, rac
     except FileNotFoundError as e:
         raise _click.ClickException(str(e))
 
-    parent = Path(output) if output else default_anim_output_dir(dat) / f'{dat.stem}_{anim}'
+    # Where the files go. Default: exports/anim/<rom path>/<stem>_<anim>/ (one clip);
+    # --split-anim drops the clip folder (the tracks ARE the files); --categories
+    # replaces the ROM path with <race>/<category>/<action>/ under the export root.
+    if categories:
+        from xi.entity.anim.xi_categories import MotionCategories
+        from xi.xi_config import XI_TOOLS_DIR
+        root = Path(output) if output else Path(XI_TOOLS_DIR) / 'exports' / 'anim'
+        parent = root / MotionCategories().dir_for(dat)
+        if not split_anim:
+            parent = parent / f'{dat.stem}_{anim}'
+    elif output:
+        parent = Path(output)
+    elif split_anim:
+        parent = default_anim_output_dir(dat)
+    else:
+        parent = default_anim_output_dir(dat) / f'{dat.stem}_{anim}'
+
+    if split_anim:
+        try:
+            gltfs = export_split(dat, parent, skeleton_dat=skel, race=race,
+                                 mesh_dats=mesh_dats, textures=not no_tex)
+        except (ValueError, FileNotFoundError) as e:
+            raise _click.ClickException(str(e))
+        for g in gltfs:
+            _click.echo(f'Exported glTF: {g}')
+        if fbx:
+            try:
+                ok, fail = convert_gltf_to_fbx_batch(
+                    [(g, g.with_suffix('.fbx')) for g in gltfs],
+                    progress=lambda m: _click.echo('  ' + m, err=True))
+            except ValueError as e:
+                raise _click.ClickException(str(e))
+            _click.echo(f'FBX: {ok} ok, {fail} failed.')
+            if fail:
+                raise _click.ClickException(f'{fail} FBX conversion(s) failed.')
+        _click.echo(f'Exported {len(gltfs)} clip(s) from {dat.name} to {parent}')
+        return
 
     def finish(gltf_path: Path, bin_path: Path) -> None:
         _click.echo(f'Exported glTF: {gltf_path}')
