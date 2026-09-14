@@ -209,9 +209,13 @@ The full ~85-opcode `when` is in `EffectRoutineParser.kt:96-540`.
 jump 0x7A, ranged start/finish 0x76/0x77, visibility 0x75/0xA3, anim-mode 0x79/0x8C/0xA4/0xA5.)
 
 ### Timing
-`delay` is **accumulated**: the engine subtracts each command's `delay` from a frame
-counter and runs commands as the counter allows, so commands are sequenced relative
-to each other. `duration` is how long that one effect lives (emit time, lock length,
+`delay` is **accumulated**, and it is the wait *after* its command: a command runs
+when the counter reaches the sum of the delays of every command *before* it, then its
+own `delay` is added for the next one (`field_98 += tag.delay` as each tag executes).
+Retail leans on this — a chained clip's delay is the previous clip's window, so Soul
+Voice's hold `cm1?` starts at 60, exactly when its 60-tick wind-up ends — and the
+header `totalDelay` is the sum of every delay including the last command's own, i.e.
+the routine's end. `duration` is how long that one effect lives (emit time, lock length,
 interpolation length). (`EffectRoutineInstance.kt:283-300`.)
 
 ---

@@ -30,7 +30,16 @@ def _effect_deps(data: bytes, sections, eff) -> List[bytes]:
     deps: List[bytes] = []
     for off in range(0x10, len(body) - 3):
         cc = body[off:off + 4]
-        if cc != self_cc and cc not in deps and (types_by_cc.get(cc, set()) & set(_DEP_TYPES)):
+        if cc in deps:
+            continue
+        types = types_by_cc.get(cc, set()) & set(_DEP_TYPES)
+        # The body naming its own fourcc is not a dependency — unless a section of
+        # another type carries that name too. Retail names an audio generator after
+        # its sound pointer (gen `8211` → 0x3D `8211`), and dropping the pointer made
+        # the client fall back to the shared DAT's same-named pointer (another sound).
+        if cc == self_cc:
+            types = types - {eff.type_code}
+        if types:
             deps.append(cc)
     for cc in list(deps):                                  # meshes -> their textures (by fourcc)
         if 0x2E in types_by_cc.get(cc, set()):

@@ -90,6 +90,19 @@ xi anim schedule copy
 xi anim schedule edit
 ```
 
+## Ability presentations (motion + VFX + sound timelines)
+
+```text
+xi ability inspect ja:N          # job-ability animation N -> flattened main timeline
+xi ability inspect spell:N       # spell index N
+xi ability inspect ws:N[:RACE]   # weapon-skill animation N (per race)
+xi ability inspect ROM/x/y       # any DAT; --routine TAG, --all, --json
+xi ability recipe SPEC           # starter recipe reproducing one source
+xi ability compose recipe.json   # recipe -> new DAT(s) (motion A + vfx B + sound C)
+xi ability publish recipe.json   # into ROM10 with a new animation number (--dry-run first)
+xi ability catalog               # the mixer's pick list (exports/ability/catalog.json)
+```
+
 ## Entity
 
 ```text
