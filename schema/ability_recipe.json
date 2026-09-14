@@ -100,7 +100,8 @@
         "loops": {"type": "integer", "minimum": 0, "description": "Clip (0x05) only: 0 = loop forever, N = play N times then hold."},
         "raw": {"type": "string", "pattern": "^([0-9A-Fa-f]{2})+$", "description": "Exact source command bytes (from `inspect --json`). Wins over routine/offset and op/ref lookup."},
         "routine": {"type": "string", "description": "With `offset`: the source routine the command is copied from."},
-        "offset": {"type": "integer", "minimum": 0, "description": "With `routine`: byte offset of the command inside that routine's sec2."}
+        "offset": {"type": "integer", "minimum": 0, "description": "With `routine`: byte offset of the command inside that routine's sec2."},
+        "name": {"type": "string", "description": "Display label (the mixer keeps the inspector's command name, e.g. PlayClip). Compose ignores it."}
       }
     }
   },

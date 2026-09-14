@@ -34,6 +34,16 @@ def test_validate_recipe_names_the_field():
     assert any("blend must be" in e for e in errs)
 
 
+def test_validate_recipe_accepts_event_names():
+    # The mixer writes the inspector's command name on every event (PlayClip,
+    # LockCasterMagic…) — a label, not an instruction, and compose ignores it.
+    r = {"name": "x", "sources": {"motion": "ja:0"},
+         "events": [{"from": "motion", "op": 5, "ref": "cm0?", "start": 0, "name": "PlayClip"}]}
+    assert ac.validate_recipe(r) == []
+    r["events"][0]["name"] = 5
+    assert ac.validate_recipe(r) == ["events[0]: 'name' must be a string"]
+
+
 def test_validate_recipe_accepts_string_sources_and_hex_ops():
     r = {"name": "x", "sources": {"motion": "ws:1:HumeMale"},
          "events": [{"from": "motion", "op": "0x05", "ref": "b00?", "start": 0, "dur": 10}]}

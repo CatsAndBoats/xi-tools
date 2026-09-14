@@ -99,7 +99,7 @@ RECIPE_SCHEMA = "xi.ability.v1"      # schema/ability_recipe.json
 _SPEC_RX = re.compile(r"^(ja:\d+|ability:\d+|spell:\d+|ws:\d+(:[A-Za-z]+)?|fid:\d+"
                       r"|ROM[0-9]*/\d+/\d+(\.DAT)?|.+\.DAT)$", re.I)
 _RECIPE_KEYS = {"schema", "name", "description", "dir", "target", "total", "sources", "events"}
-_EVENT_KEYS = {"from", "op", "ref", "start", "dur", "order", "blend", "loops", "raw", "routine", "offset"}
+_EVENT_KEYS = {"from", "op", "ref", "start", "dur", "order", "blend", "loops", "raw", "routine", "offset", "name"}
 
 
 def _is_int(v) -> bool:
@@ -161,6 +161,8 @@ def validate_recipe(r) -> List[str]:
         for k in ev:
             if k not in _EVENT_KEYS:
                 errs.append(f"{where}: unknown key {k!r}")
+        if "name" in ev and not isinstance(ev["name"], str):
+            errs.append(f"{where}: 'name' must be a string")
         if not isinstance(ev.get("from"), str):
             errs.append(f"{where}: 'from' (lane) is required")
         elif sources and ev["from"] not in sources:
