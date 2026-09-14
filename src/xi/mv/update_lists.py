@@ -119,6 +119,12 @@ def _write_json(path: Path, data: Any, *, dry_run: bool, indent: int | None = No
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
+    # Read back what landed on disk: a list the viewer cannot parse is worse than
+    # no list, so a bad write fails the run here rather than being published.
+    try:
+        json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise RuntimeError(f"{path.name}: wrote a file that does not parse as JSON ({e})") from e
 
 
 def _norm_dat(p: str) -> str:
@@ -2146,12 +2152,23 @@ def write_manifest(
         return {"target": "manifest", "wrote": False,
                 "error": f"not a directory: {lists_dir}"}
 
+    lists = [p for p in sorted(lists_dir.glob("*.json")) if p.name != MANIFEST_NAME]
+
+    # Every list is parsed before it is hashed: the manifest is the publish step,
+    # and a hand edit that broke a file must fail here, not in every viewer at boot.
+    notify("checking every list parses")
+    broken: list[str] = []
+    for p in lists:
+        try:
+            _load_json(p)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            broken.append(f"{p.name}: {e}")
+    if broken:
+        return {"target": "manifest", "file": str(lists_dir / MANIFEST_NAME), "wrote": False,
+                "error": "not published — " + "; ".join(broken)}
+
     notify("hashing lists")
-    files = {
-        p.name: {"sha256": _sha256(p), "bytes": p.stat().st_size}
-        for p in sorted(lists_dir.glob("*.json"))
-        if p.name != MANIFEST_NAME
-    }
+    files = {p.name: {"sha256": _sha256(p), "bytes": p.stat().st_size} for p in lists}
 
     out = lists_dir / MANIFEST_NAME
     prev: dict = {}

@@ -44,7 +44,10 @@ byte count for each JSON file beside it. That is not bookkeeping — it is the
 publish step. XI Model Viewer fetches this file from `main` at boot and replaces
 any list whose contents no longer match the copy it holds, so a list refreshed
 here and pushed reaches every install without a new build. A list pushed without
-its manifest reaches nobody, which is why the step is not opt-in.
+its manifest reaches nobody, which is why the step is not opt-in. Before hashing, every
+list beside it is parsed; one that does not parse fails the run (`ERROR — not published`)
+and the manifest is left as it was, so a broken file never reaches an install. Each list
+the tool writes is also read back and parsed as soon as it lands on disk.
 
 The comparison is content-addressed, so there is no version to bump on either
 side: a list reverted by hand goes back to matching on its own. The manifest
