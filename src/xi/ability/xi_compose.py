@@ -149,6 +149,8 @@ def validate_recipe(r) -> List[str]:
             for k in src:
                 if k not in ("spec", "routine", "name"):
                     errs.append(f"sources.{lane}: unknown key {k!r}")
+            if "routine" in src and src["routine"] is not None and not isinstance(src["routine"], str):
+                errs.append(f"sources.{lane}: routine must be a routine tag or null (a bare clip pack)")
     events = r.get("events")
     if not isinstance(events, list):
         errs.append("events must be a list")
@@ -223,6 +225,10 @@ def _load_lane(lane: Lane, race: Optional[str]) -> Lane:
     spec = f"{lane.spec}:{race}" if (lane.race_bound and race) else lane.spec
     t = resolve_targets(spec)[0]
     m = Model.load(t.path)
+    # A lane with no routine (`"routine": null`) is a bare clip pack — Basic, the
+    # emotes — whose events are plain PlayClip commands built from the template.
+    if lane.routine is None:
+        return Lane(lane.name, spec, None, lane.race_bound, m, t, [])
     if lane.routine not in m.routines:
         raise click.ClickException(f"lane {lane.name}: {t.rel} has no routine {lane.routine!r}")
     return Lane(lane.name, spec, lane.routine, lane.race_bound, m, t,
@@ -464,7 +470,10 @@ def compose_once(recipe: dict, lanes: Dict[str, Lane], race: Optional[str]) -> C
     starts = [int(ev["start"]) for ev, _, _ in stamped]
     end = max([s + int(ev.get("dur") or 0) for s, (ev, _, _) in zip(starts, stamped)] + starts + [0])
     total = int(recipe.get("total") or 0)
-    if total < (starts[-1] if starts else 0):
+    # No total in the recipe, or one that ends before the last command starts: the
+    # routine ends where its last window does. (A lone clip at frame 0 used to keep
+    # total 0 — the routine ended before the clip had played a frame.)
+    if not total or total < (starts[-1] if starts else 0):
         total = end
     commands, timeline = [], []
     for i, (ev, cmd, ref) in enumerate(stamped):

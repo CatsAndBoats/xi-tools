@@ -47,7 +47,7 @@
             "required": ["spec"],
             "properties": {
               "spec": {"$ref": "#/$defs/spec"},
-              "routine": {"type": "string", "default": "main", "description": "Routine tag the lane's events are read from."},
+              "routine": {"type": ["string", "null"], "default": "main", "description": "Routine tag the lane's events are read from. null: the DAT is a bare clip pack (Basic, the emotes) with no routine; its events are PlayClip commands built from the template."},
               "name": {"type": "string", "description": "Display name (the mixer keeps the catalog entry's)."}
             }
           }

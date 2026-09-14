@@ -97,6 +97,19 @@ def test_mesh_textures_come_along(root: Path):
     assert {"obi(0x20)", "shu(0x20)"} <= names, names
 
 
+def test_clip_pack_lane_without_routine(root: Path):
+    # Basic (ROM/27/82) is a clip pack: idl0/idl1/idl2 and friends, no `main`. A lane
+    # with `routine: null` composes a PlayClip from the template and carries the clips.
+    recipe = {"name": "idle", "sources": {"motion": {"spec": "ROM/27/82.DAT", "routine": None}},
+              "events": [{"from": "motion", "op": 5, "ref": "idl?", "start": 0, "dur": 30}]}
+    assert ac.validate_recipe(recipe) == []
+    (c,) = ac.compose(recipe)
+    names = {s.split("(")[0] for s in c.sections}
+    assert "idl0" in names and "main" in names, c.sections
+    assert [t["ref"] for t in c.timeline if t["op"] == 5] == ["idl?"]
+    assert c.total == 30      # the routine ends where its lone clip's window does, not at 0
+
+
 def test_race_bound_recipe_composes_per_race(root: Path):
     recipe = {"name": "rb", "sources": {"motion": {"spec": "ws:1"}},
               "events": [{"from": "motion", "op": 5, "ref": "b00?", "start": 0, "dur": 35}]}
