@@ -83,6 +83,20 @@ def test_mixed_recipe_transplants_and_renames(root: Path):
     assert any(s.endswith("(0x20)") for s in c.sections)      # a texture dependency came along
 
 
+def test_mesh_textures_come_along(root: Path):
+    # Cure III's `ob02` generator draws the `ob2` ParticleMesh (0x1F), whose texture
+    # is `obi`; `pk00` draws the `shp1` sprite sheet (0x21), whose texture is `shu`.
+    # The generators never name the textures. The walk used to follow only a
+    # ZoneMesh to its texture, so both were dropped and the composed ability drew
+    # white quads until a retail play had cached them in the viewer.
+    recipe = {"name": "cure3", "sources": {"vfx": {"spec": "spell:3"}},
+              "events": [{"from": "vfx", "op": 2, "ref": "ob02", "start": 0, "dur": 100},
+                         {"from": "vfx", "op": 2, "ref": "pk00", "start": 0, "dur": 100}]}
+    (c,) = ac.compose(recipe)
+    names = {s for s in c.sections if s.endswith("(0x20)")}
+    assert {"obi(0x20)", "shu(0x20)"} <= names, names
+
+
 def test_race_bound_recipe_composes_per_race(root: Path):
     recipe = {"name": "rb", "sources": {"motion": {"spec": "ws:1"}},
               "events": [{"from": "motion", "op": 5, "ref": "b00?", "start": 0, "dur": 35}]}

@@ -16,6 +16,7 @@ from xi.fx.xi_core import (parse_sections, resolve_dat_path, EFFECT_TYPE, _fourc
                           _mesh_fourccs, _texture_fourccs, _pos_offset, _read_pos_at)
 
 _DEP_TYPES = (0x20, 0x21, 0x1F, 0x19, 0x2E, 0x3D)  # Texture / SpriteSheetMesh / ParticleMesh / ParticleKeyFrameData / ZoneMesh / SoundEffectPointer
+_MESH_TYPES = {0x2E, 0x1F, 0x21}                    # the dependency types that name a texture of their own
 
 
 def _effect_deps(data: bytes, sections, eff) -> List[bytes]:
@@ -41,15 +42,22 @@ def _effect_deps(data: bytes, sections, eff) -> List[bytes]:
             types = types - {eff.type_code}
         if types:
             deps.append(cc)
-    for cc in list(deps):                                  # meshes -> their textures (by fourcc)
-        if 0x2E in types_by_cc.get(cc, set()):
-            for s in sections:
-                if bytes(data[s.start:s.start + 4]) == cc and s.type_code == 0x2E:
-                    mb = bytes(data[s.start:s.start + s.size])
-                    for off in range(0x10, len(mb) - 3):
-                        c2 = mb[off:off + 4]
-                        if c2 not in deps and 0x20 in types_by_cc.get(c2, set()):
-                            deps.append(c2)
+    # Meshes name their own textures, and the generator does not: a ZoneMesh (0x2E),
+    # a ParticleMesh (0x1F) or a SpriteSheetMesh (0x21) carries the texture fourcc in
+    # its body. Cure III's `ob2` mesh draws with `obi` and its `shp1` sheet with `shu`;
+    # copying the mesh without them leaves the client (and the viewer, on a cold cache)
+    # drawing white quads.
+    for cc in list(deps):
+        mesh_types = types_by_cc.get(cc, set()) & _MESH_TYPES
+        if not mesh_types:
+            continue
+        for s in sections:
+            if bytes(data[s.start:s.start + 4]) == cc and s.type_code in mesh_types:
+                mb = bytes(data[s.start:s.start + s.size])
+                for off in range(0x10, len(mb) - 3):
+                    c2 = mb[off:off + 4]
+                    if c2 not in deps and 0x20 in types_by_cc.get(c2, set()):
+                        deps.append(c2)
     return deps
 
 
