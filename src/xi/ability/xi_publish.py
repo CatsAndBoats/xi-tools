@@ -72,6 +72,13 @@ def _placement(root: Path, file_id: int) -> Optional[str]:
     return dat
 
 
+def is_placeholder(root: Path, rel: Optional[str]) -> bool:
+    """What a free slot's file id points at: retail's placeholder DAT (a ``dumm``
+    directory), or nothing. The build's dry run tells these apart from a real
+    collision, since the placeholder is what makes the slot free."""
+    return _is_dummy(root, rel)
+
+
 def _is_dummy(root: Path, rel: Optional[str]) -> bool:
     """A retail placeholder slot: the DAT exists and carries a ``dumm`` directory."""
     if not rel:

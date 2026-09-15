@@ -978,7 +978,12 @@ def _build_ability(action: dict, manifest_path: Path, manifest: dict, force: boo
                      "dat": r["target_dat"], "source": r["source"], "bytes": r["bytes"]}
             cur = f.get("current")
             if cur and cur.upper() != r["target_dat"].upper() and not _is_own_previous(action, cur):
-                entry["occupied_by"] = cur
+                # A free extended slot still points at retail's placeholder DAT (a
+                # `dumm` directory); that is what makes it free, not a collision.
+                if AP.is_placeholder(root, cur):
+                    entry["placeholder"] = cur
+                else:
+                    entry["occupied_by"] = cur
             placements.append(entry)
     except PermissionError as e:
         raise click.ClickException(AP.permission_hint(root, e))
@@ -1894,9 +1899,11 @@ def _print_placements(results: list[dict], title: str) -> None:
             for p in files:
                 who = f"{p.get('race') or 'all races'} {p['role']}"
                 occ = p.get("occupied_by")
+                ph = p.get("placeholder")
                 mark = "⚠ " if occ else ""
-                click.echo(f"     - {mark}file_id {p['file_id']:>6}  {who:<26} -> {p['dat']}"
-                           + (f"   (occupied by {occ})" if occ else ""))
+                note = (f"   (occupied by {occ})" if occ
+                        else f"   (retail placeholder {ph}, free)" if ph else "")
+                click.echo(f"     - {mark}file_id {p['file_id']:>6}  {who:<26} -> {p['dat']}{note}")
                 if occ:
                     collisions += 1
             if r.get("server"):
