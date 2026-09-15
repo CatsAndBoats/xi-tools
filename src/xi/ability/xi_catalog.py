@@ -36,10 +36,23 @@ def _ability_names() -> Dict[int, List[str]]:
 
 
 def _ws_names() -> Dict[int, List[str]]:
+    """Names for the weapon-skill motion bank, by animation id.
+
+    Three tables index that bank and they are merged in order of how much the
+    name says about the motion: player weapon skills first; then job abilities,
+    whose `animation` column names a bank slot when the ability has a motion of
+    its own — Steal 181, Mug 183, Shield Bash 185, Jump 204, Tomahawk 244,
+    Angon 245 (their VFX sit in the job-ability band, the throw or leap here);
+    then mob skills (ids below 256 share the bank), whose names are the vaguest
+    — `Dancing Chains` sits on 244 and 252 both. A slot named by an earlier
+    table keeps that name; the later ones follow in `names` for the tip.
+    """
     out: Dict[int, List[str]] = {}
     for wid, n, a in _sql_rows("weapon_skills.sql", "weapon_skills",
                                r"(\d+),'([^']*)',0x[0-9A-Fa-f]+,\d+,\d+,\d+,(\d+),"):
         out.setdefault(int(a), []).append(_title(n))
+    for a, names in _ability_names().items():
+        out.setdefault(a, []).extend(names)
     for mid, a, n in _sql_rows("mob_skills.sql", "mob_skills", r"(\d+),(\d+),'([^']*)',"):
         if int(mid) < 256:
             out.setdefault(int(a), []).append(_title(n))
