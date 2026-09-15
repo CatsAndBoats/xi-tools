@@ -1,13 +1,13 @@
 {
- "generated": "2026-09-14T19:40:59Z",
+ "generated": "2026-09-15T15:09:57Z",
  "files": {
   "abilities.json": {
    "sha256": "5db1769a46880419a3981972d33095d679052720280e4c2fe0d3f45b9eec4b90",
    "bytes": 844024
   },
   "characters.json": {
-   "sha256": "701eb5f9dd5a1a35132d0c259cf562487ca259a8ec142d2cecf7663945bd6b96",
-   "bytes": 5525319
+   "sha256": "b8f9149774a5861c435ff45ba4fbccb564d5012861adfc65b6fbbe3d7b61ce21",
+   "bytes": 5525609
   },
   "effects.json": {
    "sha256": "7c9bf30e780d9fecfa1343e6678bcaeac7d80249de661fa37cb018b38c463e93",

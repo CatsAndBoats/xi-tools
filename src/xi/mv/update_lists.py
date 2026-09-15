@@ -1092,6 +1092,13 @@ def update_gear_sets(
         data["rangedDisplay"] = ranged
         sections_written = True
 
+    # And the engaged-state rule: which action groups play with the weapons
+    # drawn (the client's attack-motion pack and the weapon skills).
+    engaged = doc.get("engagedDisplay")
+    if engaged and data.get("engagedDisplay") != engaged:
+        data["engagedDisplay"] = engaged
+        sections_written = True
+
     # Sets that were tagged once and have since been withdrawn: strip them so a
     # list written by an older run converges instead of keeping a dead bucket.
     retired = set(_gear_sets_doc().get("retiredSets") or [])

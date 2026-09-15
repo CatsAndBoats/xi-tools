@@ -59,7 +59,7 @@ indexes whatever JSON is in the directory, so a list this tool does not generate
 | Target | Source | What it adds |
 |---|---|---|
 | `gear` | FFXiMain race tables → FTABLE | Missing gear model ids per race/slot, plus one `rod: true` Ranged row per fishing rod (see [../anim/fishing.md](../anim/fishing.md)) |
-| `gear-sets` | `src/xi/mv/gear_sets.json` + existing labels | `set` on each gear row (Artifact / Relic / Empyrean / Prime / Aeonic / Mythic / Abjuration / Ebur-Furia-Ebon), `groupLabels` renames on weapon-type groups, the `rangedDisplay` rule, and clears any `retiredSets` |
+| `gear-sets` | `src/xi/mv/gear_sets.json` + existing labels | `set` on each gear row (Artifact / Relic / Empyrean / Prime / Aeonic / Mythic / Abjuration / Ebur-Furia-Ebon), `groupLabels` renames on weapon-type groups, the `rangedDisplay` and `engagedDisplay` rules, and clears any `retiredSets` |
 | `gear-labels` | `(JOB Set)` label suffix | Rewrites `Wizard's Coat (BLM Artifact)` → `BLM - Wizard's Coat` (the set is preserved in `set` first) |
 | `ws-unreleased` | `FFXiMain.dll` extended weapon-skill bank | The 16-slot bank at animations 256-271 as a **WS (Unreleased)** action category — clips the client can play that retail never named (see [../anim/weapon-skills.md](../anim/weapon-skills.md)). `dumm` slots skipped |
 | `music` | `sound*/win/music/data` | Unnamed `music*.bgw` |

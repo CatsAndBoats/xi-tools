@@ -233,6 +233,25 @@
   "showForActions": ["Fishing"],
   "handRef": 126
  },
+ "_engagedDisplayComment": [
+  "Copied into characters.json as `engagedDisplay`. Whether the weapons are in",
+  "the hands (and whether a ShowHideWeapon tag flagged ifEngaged applies) is",
+  "the client's engaged state, not anything in a clip. The PS2 client's motion",
+  "state machine (xiatelnet.cpp, XiAtelBuff) reads the attack motion pack",
+  "(ReadAtkMotionRes) only in its engaged mode and plays emotes",
+  "(ReadEMotionRes / em0?) only from its idle mode, and a weapon skill is used",
+  "engaged. So the pack a motion belongs to says which state it plays in:",
+  "these action groups play engaged, everything else (basic, general, emote,",
+  "ability) plays from the idle state unless the viewer's Base Anim is Battle."
+ ],
+ "engagedDisplay": {
+  "actionGroups": [
+   "Battle",
+   "Hand-to-hand", "Dagger", "Sword", "G. Sword", "Axe", "G. Axe", "Scythe",
+   "Polearm", "Katana", "G. Katana", "Club", "Staff", "Archery", "Marksmanship",
+   "NPC WS", "WS (Unreleased)"
+  ]
+ },
  "_fishingRodsComment": [
   "Fishing rods, by item model id (item_equipment.MId; the +1 rods carry a",
   "0x8000 flag that is masked off, giving 14 and 15). The gear target appends",
