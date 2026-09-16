@@ -148,18 +148,36 @@ Full detail: [../ability/mixer.md](../ability/mixer.md#publish).
 
 ## Building (`xi dats build`)
 
-A build writes DATs and patches their file_ids **directly into the base install
-(`FFXI_DIR`)**. There is no multi-target `--target pivot,hd` switch — the base install is
-the only place custom gear/entity file_ids can register (XIPivot cannot overlay the root
-`FTABLE`). After a successful pack build, if `FFXI_PIVOT_DIR` is set, the custom region of
-the pivot's tables is updated via `sync_pivot_from_base()` so sizes stay uniform and the
-new file_ids resolve through the overlay.
+A build writes DATs and patches their file_ids **directly into a live target root** —
+the base install (`FFXI_DIR`, the default) or the XIPivot overlay
+(`FFXI_PIVOT_DIR`, with `--target pivot`). After a successful pack build, if
+`FFXI_PIVOT_DIR` is set, the custom region of the pivot's tables is updated via
+`sync_pivot_from_base()` so sizes stay uniform.
 
 ```bash
-uv run xi dats build --project gyokko_mask            # into FFXI_DIR, then sync pivot tables
-uv run xi dats build --project gyokko_mask --dry-run  # preview only, writes nothing
-uv run xi dats changelog --project gyokko_mask        # table of recorded results
+uv run xi dats build --project gyokko_mask                  # into FFXI_DIR, then sync pivot tables
+uv run xi dats build --project gyokko_mask --target pivot   # into the overlay, no writes to the install
+uv run xi dats build --project gyokko_mask --dry-run        # preview only, writes nothing
+uv run xi dats changelog --project gyokko_mask              # table of recorded results
 ```
+
+### Which table registers a file_id
+
+The client reads the base install's root `FTABLE`/`VTABLE`, and for a file_id
+registered in a `ROM{n}` pair it honours that entry instead. An overlay's copy of the
+*root* pair has no effect — the client keeps the base install's — so a `ROM{n}` pair
+is the only table an overlay can register through, and its entry **wins** over the
+base install's root entry, including one pointing at a retail placeholder.
+
+That makes `--target pivot` the way to add `ROM{n}` content without write access to
+the game install, which matters when the install is read-only, is revalidated by a
+launcher, or is shared by more than one overlay. A root-table (`ROM/…`) placement
+still has to target the base install.
+
+Because the `ROM{n}` entry is the one that resolves, it is also the one a build reads
+when deciding whether a slot is free. Reading only the root pair reports a live custom
+slot as unregistered, or as the retail placeholder it replaced, and the allocator then
+hands the same slot out twice.
 
 - The base install's `FTABLE`/`VTABLE` **must already exist and be expanded** for the custom
   models you're placing — run `xi ftable expand entity` / `xi ftable expand gear` on

@@ -130,8 +130,11 @@ def sync_pivot_from_base(dry_run: bool = False) -> list[str]:
     """Make the pivot/override pack's lookup tables consistent with the base
     install WITHOUT clobbering the pivot's own retail-range entries.
 
-    XIPivot shadows the base install: with ``redirect_fopens`` the client reads
-    whichever FTABLE/VTABLE exists in the pivot folder instead of the base copy.
+    The pivot's tables are kept uniform with the base install's. Note that the
+    client does NOT read an overlay's copy of the *root* FTABLE/VTABLE — it keeps
+    the base install's — so this sync is about size/consistency, not about making
+    root-pair registrations resolve. A ROM{n} pair in the overlay IS read, and
+    overrides the base install's root entry (see xi.ftable.xi_core.resolve_dat_in_root).
     So every table the pivot overrides must (a) be the SAME SIZE as the base table
     (a size mismatch crashes the client on load) and (b) carry xi's custom
     registrations, or custom gear/entity file_ids won't resolve through the overlay.

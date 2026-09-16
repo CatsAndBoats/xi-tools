@@ -372,16 +372,31 @@ def _patch_raw_table(ft: Path, vt: Path, file_id: int, ftval: int, vt_val: int) 
 
 
 def patch_launcher_tables(file_id: int, ftval: int, rom: int) -> None:
-    """Register file_id -> placement in the active target's base + ROM{rom} tables.
-    A target with no FTABLE (e.g. the HD overlay) is a DAT-only drop — the file_id
-    registration comes from another target's tables — so skip patching there."""
+    """Register file_id -> placement in the active target's ROM{rom} + root tables.
+
+    For a ROM{n} placement the ROM{n} pair is the registration that counts: the
+    client honours it over the root pair, and in an XIPivot overlay it is the only
+    table that has any effect (the client keeps the base install's root pair). The
+    root pair is patched too when the target has one, so a base-install target
+    still resolves the id with no ROM{n} tables present.
+
+    A target with neither table (e.g. the HD overlay) is a DAT-only drop — the
+    file_id registration comes from another target's tables — so nothing is
+    patched there."""
     root = _active_build_root()
-    if not (root / "FTABLE.DAT").exists():
-        return
-    _patch_raw_table(root / "FTABLE.DAT", root / "VTABLE.DAT", file_id, ftval, rom)
-    if rom != 1:
-        _patch_raw_table(root / f"ROM{rom}" / f"FTABLE{rom}.DAT",
-                         root / f"ROM{rom}" / f"VTABLE{rom}.DAT", file_id, ftval, rom)
+    rom_ft, rom_vt = root / f"ROM{rom}" / f"FTABLE{rom}.DAT", root / f"ROM{rom}" / f"VTABLE{rom}.DAT"
+    patched = False
+    if rom != 1 and rom_ft.exists() and rom_vt.exists():
+        _patch_raw_table(rom_ft, rom_vt, file_id, ftval, rom)
+        patched = True
+    if (root / "FTABLE.DAT").exists():
+        _patch_raw_table(root / "FTABLE.DAT", root / "VTABLE.DAT", file_id, ftval, rom)
+        patched = True
+    if not patched and rom != 1:
+        raise click.ClickException(
+            f"{root} has no ROM{rom} tables and no root tables — file_id {file_id:,} "
+            f"cannot be registered there. Provision ROM{rom}/FTABLE{rom}.DAT (see "
+            "`xi ftable expand`) or build into a target that has tables.")
 
 
 def _patch_active_tables(file_id: int, ftval: int, rom: int) -> None:
@@ -389,13 +404,11 @@ def _patch_active_tables(file_id: int, ftval: int, rom: int) -> None:
 
 
 def _active_placement(file_id: int) -> str | None:
-    """What file_id is registered to in the active target's tables (collision check)."""
-    from xi.ftable.xi_core import resolve_dat
-    root = _active_build_root()
-    ft, vt = root / "FTABLE.DAT", root / "VTABLE.DAT"
-    if not ft.exists() or not vt.exists():
-        return None
-    dat, _ = resolve_dat(ft.read_bytes(), vt.read_bytes(), file_id)
+    """What file_id is registered to in the active target, as the client resolves
+    it: the custom ROM pair first, then the root pair. Reading only the root pair
+    misses registrations that an overlay target can only make in its ROM pair."""
+    from xi.ftable.xi_core import resolve_dat_in_root
+    dat, _ = resolve_dat_in_root(_active_build_root(), file_id)
     return dat
 
 
@@ -1431,6 +1444,9 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
 @click.argument("manifest", type=click.Path(path_type=Path), default=None, required=False)
 @click.option("--project", default=None, help="Manifest name — builds dats/<project>.json instead of dats/update.json.")
 @click.option("--only", "only", multiple=True, help="Build only these action ids (repeatable).")
+@click.option("--target", "targets", multiple=True, type=click.Choice(["dir", "pivot"]),
+              help="Where to place DATs and register file_ids: 'dir' the base install (default), "
+                   "'pivot' the XIPivot overlay (FFXI_PIVOT_DIR). Repeatable.")
 @click.option("--verbose", is_flag=True, default=False, help="Print options/resource/texture detail under each action.")
 @click.option("--force", is_flag=True, default=False,
               help="Allow a file_id collision with another project's placement, or target.dat == source.dat.")
@@ -1439,14 +1455,22 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
                    "without writing any files or patching tables.")
 @click.option("--dry-note/--no-dry-note", default=True, hidden=True,
               help="Print the trailing 'Dry run — nothing written' note (the wizard suppresses it).")
-def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...], verbose: bool,
+def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
+              targets: tuple[str, ...], verbose: bool,
               force: bool, dry_run: bool, dry_note: bool = True):
-    """Build a manifest directly into the base install (FFXI_DIR).
+    """Build a manifest into a live target root: the base install (default) or the
+    XIPivot overlay (`--target pivot`).
 
-    DATs are placed and their file_ids registered straight into the base install's
-    tables (which must already exist + be expanded); the tables are backed up once
-    to `<name>.base` before the first patch. (XIPivot can't overlay the root FTABLE,
-    so the base install is the only target where custom gear/entity file_ids resolve.)
+    DATs are placed and their file_ids registered straight into the target's tables
+    (which must already exist + be expanded); the tables are backed up once to
+    `<name>.base` before the first patch.
+
+    The client keeps reading the base install's root FTABLE/VTABLE and ignores an
+    overlay's copy of those, but it does honour an overlay's ROM{n} tables, and an
+    entry there wins over the base install's root entry. So a ROM{n} placement
+    registers fine from an overlay, which is the way to add content without write
+    access to the game install. A root-table (ROM/) placement still needs the base
+    install as its target.
     """
     import xi.xi_config as cfg
 
@@ -1479,16 +1503,27 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
         click.echo(f"Copied {len(copied_tables)} f/v tables -> {standard_root}")
 
     # mesh + the verbatim-placement types write DATs + table patches directly into
-    # the base install (the only target whose root FTABLE the client actually reads).
+    # each selected target root.
     pack_actions = [a for a in active_actions
                     if a.get("type") in ("mesh", "entity", "gear", "mount", "ability")]
-    target_roots = [("dir", _target_root("dir"))]
+    target_roots = [(name, _target_root(name)) for name in (targets or ("dir",))]
     if pack_actions:
+        from xi.xi_config import CUSTOM_ROM_IDX
         n_with_tables = 0
         for name, root in target_roots:
-            has_tables = _ftable_entries(root / "FTABLE.DAT") > 0
+            # A ROM{n} pair alone is enough: the client honours it over the root
+            # pair, which is how an overlay registers a file_id at all.
+            rom_ft = root / f"ROM{CUSTOM_ROM_IDX}" / f"FTABLE{CUSTOM_ROM_IDX}.DAT"
+            root_entries = _ftable_entries(root / "FTABLE.DAT")
+            rom_entries = _ftable_entries(rom_ft)
+            has_tables = max(root_entries, rom_entries) > 0
             n_with_tables += has_tables
-            suffix = "" if has_tables else "  (DAT-only — no FTABLE here)"
+            if not has_tables:
+                suffix = "  (DAT-only — no FTABLE here)"
+            elif root_entries == 0:
+                suffix = f"  (ROM{CUSTOM_ROM_IDX} tables only)"
+            else:
+                suffix = ""
             click.echo(f"Target: {_TARGET_LABELS[name]} -> {root}{suffix}")
         if n_with_tables == 0:
             raise click.ClickException(

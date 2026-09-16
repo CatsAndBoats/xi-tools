@@ -15,6 +15,43 @@ def vtable_path(rom_idx: int) -> str:
     return os.path.join(FFXI_DIR, f'ROM{rom_idx}', f'VTABLE{rom_idx}.DAT')
 
 
+def root_table_pair(root, rom_idx: int):
+    """The (FTABLE, VTABLE) pair for ``rom_idx`` under an arbitrary DAT root."""
+    root = str(root)
+    if rom_idx == 1:
+        return os.path.join(root, 'FTABLE.DAT'), os.path.join(root, 'VTABLE.DAT')
+    return (os.path.join(root, f'ROM{rom_idx}', f'FTABLE{rom_idx}.DAT'),
+            os.path.join(root, f'ROM{rom_idx}', f'VTABLE{rom_idx}.DAT'))
+
+
+def resolve_dat_in_root(root, file_id: int, rom_idx: int = None):
+    """What the client loads for ``file_id`` given a DAT root, as (dat, rom).
+
+    A ROM{n} table pair overrides the root pair, so it is consulted first. This
+    matters for an XIPivot overlay: the client keeps reading the base install's
+    root FTABLE/VTABLE and ignores an overlay's copy of them, but it does honour
+    an overlay's ROM{n} pair, and that entry wins over the base install's root
+    entry. So the ROM{n} pair is the only table that can register a file_id from
+    an overlay, and reading only the root pair misses live registrations.
+    """
+    from xi.xi_config import CUSTOM_ROM_IDX
+    if rom_idx is None:
+        rom_idx = CUSTOM_ROM_IDX
+    for idx in (rom_idx, 1):
+        ft, vt = root_table_pair(root, idx)
+        ft, vt = read_path_for(ft), read_path_for(vt)
+        if not (os.path.exists(ft) and os.path.exists(vt)):
+            continue
+        with open(ft, 'rb') as f:
+            fdata = f.read()
+        with open(vt, 'rb') as f:
+            vdata = f.read()
+        dat, rom = resolve_dat(fdata, vdata, file_id)
+        if dat is not None:
+            return dat, rom
+    return None, None
+
+
 def load_tables(rom_idx: int):
     # Read the live tables (expanded/injected edits are in place).
     ft = read_path_for(ftable_path(rom_idx))

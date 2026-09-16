@@ -42,7 +42,6 @@ import click
 from xi.ability.xi_compose import Composed, _lanes, compose, load_recipe, output_name
 from xi.ability.xi_inspect import ABILITY_FILE_OFFSET
 from xi.entity.anim.xi_motion_tables import resolve_weapon_skill
-from xi.ftable.xi_core import resolve_dat
 
 JA_CUSTOM_FIRST = 339           # first animation number past the retail band
 JA_CUSTOM_LAST = 499            # 4412 + 499 = 4911, just below the weapon-skill VFX band
@@ -65,10 +64,18 @@ OUT_ROOT = Path("exports") / "ability"      # composed DATs + reports, per recip
 
 
 def _placement(root: Path, file_id: int) -> Optional[str]:
-    ft, vt = root / "FTABLE.DAT", root / "VTABLE.DAT"
-    if not ft.exists() or not vt.exists():
-        raise click.ClickException(f"{root} has no FTABLE.DAT/VTABLE.DAT — not a DAT root")
-    dat, _ = resolve_dat(ft.read_bytes(), vt.read_bytes(), file_id)
+    """Where ``file_id`` resolves in ``root``, the way the client resolves it: the
+    custom ROM table pair overrides the root pair. An animation number is picked
+    against this, so it has to see ROM{n} registrations — in an overlay they are
+    the only ones that take effect."""
+    from xi.ftable.xi_core import root_table_pair, resolve_dat_in_root
+    from xi.xi_config import CUSTOM_ROM_IDX
+    have = any(Path(p).exists() for pair in (root_table_pair(root, CUSTOM_ROM_IDX),
+                                             root_table_pair(root, 1)) for p in pair)
+    if not have:
+        raise click.ClickException(
+            f"{root} has no FTABLE.DAT/VTABLE.DAT and no ROM{CUSTOM_ROM_IDX} tables — not a DAT root")
+    dat, _ = resolve_dat_in_root(root, file_id)
     return dat
 
 
