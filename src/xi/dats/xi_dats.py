@@ -1445,8 +1445,9 @@ def _list_glb_textures(mesh_path: Path) -> list[tuple[str, str, str]]:
 @click.option("--project", default=None, help="Manifest name — builds dats/<project>.json instead of dats/update.json.")
 @click.option("--only", "only", multiple=True, help="Build only these action ids (repeatable).")
 @click.option("--target", "targets", multiple=True, type=click.Choice(["dir", "pivot"]),
-              help="Where to place DATs and register file_ids: 'dir' the base install (default), "
-                   "'pivot' the XIPivot overlay (FFXI_PIVOT_DIR). Repeatable.")
+              help="Where to place DATs and register file_ids: 'dir' the base install, "
+                   "'pivot' the XIPivot overlay (FFXI_PIVOT_DIR). Repeatable. "
+                   "Default: $DATS_TARGET, else 'dir'.")
 @click.option("--verbose", is_flag=True, default=False, help="Print options/resource/texture detail under each action.")
 @click.option("--force", is_flag=True, default=False,
               help="Allow a file_id collision with another project's placement, or target.dat == source.dat.")
@@ -1506,7 +1507,7 @@ def build_cmd(manifest: Path | None, project: str | None, only: tuple[str, ...],
     # each selected target root.
     pack_actions = [a for a in active_actions
                     if a.get("type") in ("mesh", "entity", "gear", "mount", "ability")]
-    target_roots = [(name, _target_root(name)) for name in (targets or ("dir",))]
+    target_roots = [(name, _target_root(name)) for name in (targets or (cfg.DATS_TARGET,))]
     if pack_actions:
         from xi.xi_config import CUSTOM_ROM_IDX
         n_with_tables = 0

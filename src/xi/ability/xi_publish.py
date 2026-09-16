@@ -289,11 +289,21 @@ def server_snippet(recipe: dict, kind: str, animation: int) -> str:
 
 
 def permission_hint(root: Path, e: PermissionError) -> str:
-    return (f"cannot write {e.filename}: the target's file tables are owned by another account "
-            "(a launcher or updater that ran elevated). Either run this command from an "
-            "elevated terminal, or grant yourself modify rights on the install once:\n"
-            f'  icacls "{root}" /grant "%USERNAME%":(OI)(CI)M /T\n'
-            "Nothing was registered; any DAT already copied is unreferenced and harmless.")
+    from xi.xi_config import FFXI_PIVOT_DIR
+    lead = (f"cannot write {e.filename}: the target's file tables are owned by another account "
+            "(a launcher or updater that ran elevated).")
+    overlay = ""
+    if FFXI_PIVOT_DIR and Path(FFXI_PIVOT_DIR).resolve() != Path(root).resolve():
+        # A ROM{n} placement registers from an overlay, so building there is a better
+        # answer than taking ownership of a game install.
+        overlay = ("\nA ROM{n} placement registers from an overlay, so the simplest fix is to "
+                   "build there and leave the install alone:\n"
+                   "  --target pivot          (or set DATS_TARGET=pivot in .env)")
+    elevate = ("\nEither run this command from an elevated terminal, or grant yourself modify "
+               "rights on the install once:\n"
+               f'  icacls "{root}" /grant "%USERNAME%":(OI)(CI)M /T')
+    return (lead + overlay + elevate +
+            "\nNothing was registered; any DAT already copied is unreferenced and harmless.")
 
 
 # ── `xi ability publish` — the dats action, prepared and built in one command ────────
@@ -306,10 +316,14 @@ def permission_hint(root: Path, e: PermissionError) -> str:
               help="Publish as a job ability, spell or weapon skill (auto = from the recipe).")
 @click.option("--animation", type=int, default=None, help="Animation number to use (default: next free).")
 @click.option("--subdir", type=int, default=DEFAULT_SUBDIR, show_default=True, help="ROM10 folder to place DATs in.")
+@click.option("--target", "targets", multiple=True, type=click.Choice(["dir", "pivot"]),
+              help="Where to place the DAT(s) and register the file id(s): 'dir' the base install, "
+                   "'pivot' the XIPivot overlay (FFXI_PIVOT_DIR). Repeatable. "
+                   "Default: $DATS_TARGET, else 'dir'.")
 @click.option("--force", is_flag=True, help="Repoint a file id that is already registered.")
 @click.option("--dry-run", is_flag=True, help="Show the plan; write nothing.")
 def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation: Optional[int],
-                subdir: int, force: bool, dry_run: bool):
+                subdir: int, targets: tuple, force: bool, dry_run: bool):
     """Publish RECIPE_PATH through `xi dats`: prepare an ability action, then build it.
 
     \b
@@ -327,4 +341,4 @@ def publish_cmd(recipe_path: Path, project: Optional[str], kind: str, animation:
                kind=kind, animation=animation, subdir=subdir)
     click.echo()
     ctx.invoke(build_cmd, project=project, only=(f"ability.{_slug(recipe['name'])}",),
-               force=force, dry_run=dry_run)
+               targets=targets, force=force, dry_run=dry_run)

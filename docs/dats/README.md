@@ -174,6 +174,16 @@ the game install, which matters when the install is read-only, is revalidated by
 launcher, or is shared by more than one overlay. A root-table (`ROM/…`) placement
 still has to target the base install.
 
+A setup that should never write the install sets the default once instead of passing
+the flag every time:
+
+```ini
+# .env
+DATS_TARGET=pivot
+```
+
+`--target` overrides it, and `xi ability publish` takes the same option.
+
 Because the `ROM{n}` entry is the one that resolves, it is also the one a build reads
 when deciding whether a slot is free. Reading only the root pair reports a live custom
 slot as unregistered, or as the retail placeholder it replaced, and the allocator then

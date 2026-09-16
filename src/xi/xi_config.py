@@ -83,6 +83,13 @@ FFXI_PIVOT_DIR = os.environ.get('FFXI_PIVOT_DIR', '')
 # FFXI_DIR. Empty when unset; hd_path_for() raises if it is needed but unset.
 FFXI_HD_DIR = os.environ.get('FFXI_HD_DIR', '')
 
+# Default target root for `xi dats build` / `xi ability publish`: 'dir' the base
+# install (FFXI_DIR), 'pivot' the XIPivot overlay (FFXI_PIVOT_DIR). A ROM{n}
+# placement registers fine from an overlay, so a setup that must not write the
+# game install (read-only, launcher-revalidated, or shared by several overlays)
+# sets DATS_TARGET=pivot once instead of passing --target every time.
+DATS_TARGET = os.environ.get('DATS_TARGET', 'dir')
+
 
 def apply_env_overrides(values: dict[str, str]) -> None:
     """Push path/config keys into ``os.environ`` and refresh this module's globals.
