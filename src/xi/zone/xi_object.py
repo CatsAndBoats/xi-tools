@@ -440,9 +440,31 @@ def _bake_uniform_scale(prims, scale) -> None:
         p.positions = [(x * sx, y * sx, z * sx) for (x, y, z) in p.positions]
 
 
+def _stored_texname(nm: str | None) -> str | None:
+    """A texture name as the 16-byte mesh-section texname field stores it (truncated,
+    stripped) — the form the texture injector sees after the mesh round-trips."""
+    if not nm:
+        return nm
+    enc = nm.strip().encode("ascii", "replace")[:0x10]
+    return enc.split(b"\x00", 1)[0].decode("ascii", "replace").strip()
+
+
+def _unique_texname(base: str, taken: set[str]) -> str:
+    """``base`` (<=16 chars) if free, else ``base[:14]`` + a two-digit counter."""
+    base = _stored_texname(base) or "xi_tex"
+    if base not in taken:
+        return base
+    for i in range(1, 100):
+        cand = f"{base[:14]}{i:02d}"
+        if cand not in taken:
+            return cand
+    raise ValueError(f"no free texture name for '{base}'")
+
+
 def _build_texture_blobs(data: bytearray, sections, prims, glb_path: Path,
                          max_size: int | None = None, force_opaque: bool = False,
-                         force_replace: bool = False) -> bytearray:
+                         force_replace: bool = False, renames: dict | None = None,
+                         rename_base: str = "") -> bytearray:
     """Build 0x20 texture sections for every texture referenced by ``prims`` that is
     not already present in ``data``. Returns the concatenated section bytes (to splice
     before the trailing terminator). Each texture is sourced from an external
@@ -453,7 +475,14 @@ def _build_texture_blobs(data: bytearray, sections, prims, glb_path: Path,
     force_replace: when True, existing texture sections whose name matches a texture in
     ``prims`` are spliced out of ``data`` so the freshly-encoded version is used instead.
     Required for Refresh-from-disk / replace-object: without it the old pixels survive
-    because the ``existing`` guard skips re-injection of same-named textures."""
+    because the ``existing`` guard skips re-injection of same-named textures.
+
+    renames: when a dict is passed, a same-named texture is never replaced. Identical
+    pixels are shared; different pixels are injected under a fresh name (from
+    ``rename_base``, e.g. the mesh name) and recorded as ``renames[old] = new`` so the
+    caller can point its mesh at it. Texture names come from GLB material names, and
+    unrelated GLBs often share one (four pumpkin variants all called 'Pumpkin') —
+    replacing would leave every earlier mesh drawing the last GLB's pixels."""
     from xi.entity.mesh.xi_export import parse_texture as _parse_texture
     from xi.entity.mesh.xi_import import encode_png_to_texture_section
     from xi.utils.xi_core import DEFAULT_ALPHA_SCALE
@@ -472,6 +501,29 @@ def _build_texture_blobs(data: bytearray, sections, prims, glb_path: Path,
     embedded = _extract_embedded_glb_textures(glb_path) if glb_path else {}
     ffxi_alpha = 1.0 / DEFAULT_ALPHA_SCALE
 
+    def encode(raw_tex: str, dat_name: str):
+        """Encode the image for ``raw_tex`` (the GLB-side name) as a section named ``dat_name``."""
+        fourcc = dat_name.replace(" ", "")[:4].ljust(4, "_")
+        candidates = [glb_path.parent / f"{raw_tex}.png",
+                      glb_path.parent / f"{raw_tex.replace(' ', '_')}.png",
+                      glb_path.parent / f"{raw_tex.replace('   ', '_')}.png"]
+        png_path = next((p for p in candidates if p.exists()), None)
+        with tempfile.TemporaryDirectory() as tmp:
+            if png_path is not None:
+                return encode_png_to_texture_section(fourcc, dat_name, png_path, Path(tmp),
+                                                     force_format="DXT3", max_size=cap, alpha_scale=ffxi_alpha,
+                                                     force_opaque=force_opaque)
+            if raw_tex in embedded:
+                tmp_png = Path(tmp) / f"{raw_tex}.png"
+                if _write_as_png(embedded[raw_tex], tmp_png):
+                    return encode_png_to_texture_section(fourcc, dat_name, tmp_png, Path(tmp),
+                                                         force_format="DXT3", max_size=cap, alpha_scale=ffxi_alpha,
+                                                         force_opaque=force_opaque)
+                click.echo(f"[texture] '{raw_tex}' embedded image could not be decoded — skipped", err=True)
+                return None
+            click.echo(f"[texture] '{raw_tex}' not found (no external PNG, no embedded texture) — skipped", err=True)
+            return None
+
     blobs = bytearray()
     seen = set()
     to_remove = []   # old sections to splice out (force_replace path only)
@@ -479,29 +531,22 @@ def _build_texture_blobs(data: bytearray, sections, prims, glb_path: Path,
         raw_tex = (prim.texture_name or "").strip()
         if not raw_tex or raw_tex in seen:
             continue
-        if raw_tex in existing_names and not force_replace:
+        if raw_tex in existing_names and not force_replace and renames is None:
             continue
-        fourcc = raw_tex.replace(" ", "")[:4].ljust(4, "_")
-        candidates = [glb_path.parent / f"{raw_tex}.png",
-                      glb_path.parent / f"{raw_tex.replace(' ', '_')}.png",
-                      glb_path.parent / f"{raw_tex.replace('   ', '_')}.png"]
-        png_path = next((p for p in candidates if p.exists()), None)
-        blob = None
-        with tempfile.TemporaryDirectory() as tmp:
-            if png_path is not None:
-                blob = encode_png_to_texture_section(fourcc, raw_tex, png_path, Path(tmp),
-                                                     force_format="DXT3", max_size=cap, alpha_scale=ffxi_alpha,
-                                                     force_opaque=force_opaque)
-            elif raw_tex in embedded:
-                tmp_png = Path(tmp) / f"{raw_tex}.png"
-                if _write_as_png(embedded[raw_tex], tmp_png):
-                    blob = encode_png_to_texture_section(fourcc, raw_tex, tmp_png, Path(tmp),
-                                                         force_format="DXT3", max_size=cap, alpha_scale=ffxi_alpha,
-                                                         force_opaque=force_opaque)
-                else:
-                    click.echo(f"[texture] '{raw_tex}' embedded image could not be decoded — skipped", err=True)
-            else:
-                click.echo(f"[texture] '{raw_tex}' not found (no external PNG, no embedded texture) — skipped", err=True)
+        blob = encode(raw_tex, raw_tex)
+        if blob and renames is not None and raw_tex in existing_names:
+            seen.add(raw_tex)
+            old = existing[raw_tex]
+            if bytes(data[old.start:old.start + old.size]) == bytes(blob):
+                click.echo(f"[texture] '{raw_tex}' already in DAT with the same pixels — shared", err=True)
+                continue
+            new_name = _unique_texname(rename_base or raw_tex, existing_names | seen | set(renames.values()))
+            blob = encode(raw_tex, new_name)
+            if blob:
+                renames[raw_tex] = new_name
+                blobs += blob
+                click.echo(f"[texture] '{raw_tex}' already in DAT with different pixels — injected as '{new_name}'", err=True)
+            continue
         if blob:
             verb = "replaced" if raw_tex in existing_names else "injected"
             click.echo(f"[texture] '{raw_tex}' {verb} into DAT", err=True)
@@ -789,7 +834,18 @@ def import_object(dat_path: Path, glb_path: Path, mesh_name: str,
             if n_ao:
                 click.echo(f"[object] baked ambient occlusion into {n_ao} vertices (floor {ao_floor})", err=True)
         encoded = _copy_exported_mesh_section(glb_path, source_mesh_name, mesh_name, table1, table2)
+    tex_blobs = None
     if encoded is None:
+        # Custom GLB: build its textures BEFORE encoding the mesh. Texture names are GLB
+        # material names, and unrelated GLBs often share one ('Pumpkin'); a clash with
+        # different pixels gets a fresh name, and the mesh must reference that name.
+        for _p in new_prims:
+            _p.texture_name = _stored_texname(_p.texture_name)
+        tex_renames: dict = {}
+        tex_blobs = _build_texture_blobs(data, sections, new_prims, glb_path, force_opaque=opaque,
+                                         renames=tex_renames, rename_base=mesh_name)
+        for _p in new_prims:
+            _p.texture_name = tex_renames.get(_p.texture_name, _p.texture_name)
         encoded = encode_zone_mesh_section(mesh_name, new_prims, template_bytes,
                                            encrypt_tables=(table1, table2), shade=shade)
         # patch the 4-byte FourCC (section name) with the mesh name (padded/truncated to 4 chars)
@@ -800,11 +856,12 @@ def import_object(dat_path: Path, glb_path: Path, mesh_name: str,
     # --- add any textures referenced by the new mesh that aren't in the target DAT ---
     # Shared with the replace path: native source resolution, power-of-two, hard-capped
     # to TEXTURE_CLAMP (xi_config). DXT3 + FFXI half-scale alpha.
-    # force_replace=True: if a same-named texture already exists (e.g. from the baked
-    # original being replaced by a Refresh-from-disk), splice it out and inject fresh so
+    # force_replace=True (raw / zone re-export meshes only — custom GLBs were handled
+    # above): if a same-named texture already exists, splice it out and inject fresh so
     # the new pixels are actually used. Re-parse sections after since offsets may shift.
-    tex_blobs = _build_texture_blobs(data, sections, new_prims, glb_path, force_opaque=opaque,
-                                     force_replace=True)
+    if tex_blobs is None:
+        tex_blobs = _build_texture_blobs(data, sections, new_prims, glb_path, force_opaque=opaque,
+                                         force_replace=True)
     sections = parse_sections(data)   # re-parse: _build_texture_blobs may have spliced out old sections
 
     # --- splice mesh section + textures after the last 0x2E section ---
