@@ -9,6 +9,7 @@ Supports:
   vfx.modify         — patch position (and optionally scale) of a 0x05 generator
   vfx.remove         — splice out a 0x05 generator section entirely
   vfx.add            — duplicate an existing 0x05 generator with a new name + position
+  meshTints          — scale a mesh's baked vertex colours by an RGB multiplier (xi_tint)
 
 JSON format (as exported by web/leveleditor via Changes > Export JSON):
 
@@ -1831,6 +1832,13 @@ def apply_changes_data(dat_path: Path, changes: dict, debug: bool = False, use_h
         data = bytearray(stripped)
         results["interactions"] = info
         _dbg(f"stripped 0x36 interactions {sorted(set(strip_kinds))}: {info}")
+
+    # Per-model colour tints: scale the baked vertex colours of each named mesh. Runs after
+    # every import/delete so it sees the final mesh set (cross-zone copies included).
+    mesh_tints = changes.get("meshTints") or {}
+    if mesh_tints:
+        from xi.zone.xi_tint import tint_zone_meshes
+        results["meshTints"] = tint_zone_meshes(data, mesh_tints, table1, table2)
 
     # Final point of no return: once these bytes hit disk the publish is committed.
     # A cancel here means we never started the write, so the DAT isn't corrupted mid-write.

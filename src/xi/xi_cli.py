@@ -72,6 +72,7 @@ from xi.fx       import xi_export       as fx_export
 from xi.tex      import xi_list       as tex_list
 from xi.tex      import xi_export      as tex_export
 from xi.tex      import xi_import     as tex_import
+from xi.tex      import xi_normals    as tex_normals
 from xi.title    import xi_title_cmds as title_cmds
 from xi.ui       import xi_extract   as ui_export
 from xi.ui       import xi_gen_sheet as ui_gen_sheet
@@ -517,6 +518,7 @@ tex.add_command(tex_list.list_cmd,     'list')
 tex.add_command(xi_simplified.tex_json_cmd, 'json')
 tex.add_command(tex_export.export_cmd, 'export')
 tex.add_command(tex_import.import_cmd, 'import')
+tex.add_command(tex_normals.normals_cmd, 'normals')
 tex_list.list_cmd.hidden = True
 
 

@@ -345,6 +345,7 @@ xi tex json
 xi tex list
 xi tex export
 xi tex import
+xi tex normals              # name normal maps for VanaCore texture packs (docs/tex/normals.md)
 
 xi ui tex
 xi ui tex export

@@ -4034,12 +4034,28 @@ def _export(params: dict) -> dict:
             main_plc.append(ch)
     apply_changes["placements"] = main_plc
 
+    # Per-model colour tints are relative to the pristine mesh. Without a reset the DAT still
+    # carries the last publish's tint, so apply only the difference (see xi_tint.tint_factors).
+    if apply_changes.get("meshTints"):
+        from xi.zone.xi_tint import tint_factors
+        apply_changes["meshTints"] = tint_factors(apply_changes["meshTints"], relative=not params.get("reset"))
+
     # Reset has just (re)written the live DAT from pristine — a cancel from here on leaves it
     # reverted/partial, which is the "bad state" the editor warns about. Check before the
     # (longer) apply so an early Stop is honoured.
     _check_cancel(cancel)
     results = apply_changes_data(dat, apply_changes, debug=bool(params.get("debug")), use_hd=use_hd,
                                  cancel=cancel)
+
+    # The DAT now carries each model tint: record it as `pub` in the persisted change-set, so a
+    # reload can tell a tinted DAT from a pristine one and a no-reset publish only applies the
+    # difference. The editor mirrors this in memory (markMeshTintsPublished).
+    tints_save = changes.get("meshTints")
+    if isinstance(tints_save, dict) and tints_save:
+        for rec in tints_save.values():
+            if isinstance(rec, dict) and isinstance(rec.get("rgb"), list):
+                rec["pub"] = list(rec["rgb"])
+        (d / "zone-changes.json").write_text(json.dumps(changes, indent=2), encoding="utf-8")
 
     # Pasted effects (vfx op:add with source_dat) are auto-named at apply time ('l_01' → 'l_00').
     # Pin that id into the persisted change-set so every later publish re-creates the copy under

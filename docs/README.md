@@ -245,6 +245,7 @@ Commands live under `xi ui tex …` and `xi ui layout …`.
 
 | Doc | Summary |
 |-----|---------|
+| [tex/normals.md](tex/normals.md) | `xi tex normals` — name normal maps for VanaCore texture packs from a `tex_debug` dump |
 | [ui/export.md](ui/export.md) | `xi ui tex export` / `sx` — extract textures from a UI DAT |
 | [ui/import.md](ui/import.md) | `xi ui tex import` / `si` — re-import edited textures |
 | [ui/list.md](ui/list.md) | `xi ui tex list` — list UI DATs by magic |

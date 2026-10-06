@@ -199,8 +199,12 @@ def _looks_like_submesh(data, p: int, section_end: int, stride: int) -> bool:
     return ni_at + 4 + num_idx * 2 <= section_end
 
 
-def parse_zone_mesh_section(data: bytes, section) -> Tuple[str, List[ZonePrimitive]]:
-    """Parse one decrypted 0x2E section into (mesh name, textured triangle prims)."""
+def parse_zone_mesh_section(data: bytes, section,
+                            color_offsets: Optional[List[int]] = None) -> Tuple[str, List[ZonePrimitive]]:
+    """Parse one decrypted 0x2E section into (mesh name, textured triangle prims).
+
+    ``color_offsets``, when given, collects the byte offset of every vertex's BGRA colour
+    (once per stored vertex, not per triangle corner) so callers can patch colours in place."""
     ds = section.data_start
     config = struct.unpack_from("<I", data, ds + 4)[0] & 0xFF
     is_strip = (config & 0x1) != 0
@@ -261,6 +265,8 @@ def parse_zone_mesh_section(data: bytes, section) -> Tuple[str, List[ZonePrimiti
                 normal = struct.unpack_from("<3f", data, p + 12)  # p0,n0
                 c_off = p + 24
             # per-vertex colour (baked lighting) sits right after the normal, BGRA bytes
+            if color_offsets is not None:
+                color_offsets.append(c_off)
             cb, cg, cr, ca = data[c_off], data[c_off + 1], data[c_off + 2], data[c_off + 3]
             color = (cr / 255.0, cg / 255.0, cb / 255.0, ca / 255.0)
             u, v = struct.unpack_from("<2f", data, p + stride - 8)
