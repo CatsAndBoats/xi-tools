@@ -54,6 +54,7 @@ Per-actor 0x66 Tpc motion PACKAGES (Cornelia's kka0 = package 12) remain future 
 from __future__ import annotations
 
 import math
+import re
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -2550,19 +2551,26 @@ def _compile_dialog(cutscene: dict, dialog_dat: bytes,
     # dialog DAT per line made a 36-line event cost 14 s). Placement rules are those of
     # xi_author.append_dialog_lines: overwrite the reuse slot, else share a byte-identical
     # entry, else append.
+    # Entries are matched on their content: retail pads after the terminator (`00 07`), our
+    # encoder doesn't, so an exact-bytes match never finds a retail line and a recompiled
+    # retail event appended a copy of nearly every line it prints (Aht Urhgan Whitegate's
+    # Rendezvous Point 966: 401 lines, 37 KB).
+    from xi.event.xi_decompile import _unpad
     blobs, obf = xi_dialog.raw_entry_blobs(dialog_dat)
     existing: dict[bytes, int] = {}
     for idx, b in enumerate(blobs):
-        existing.setdefault(bytes(b), idx)
+        existing.setdefault(_unpad(bytes(b)), idx)
 
     def place(blob: bytes, slot) -> int:
-        key = bytes(blob)
+        key = _unpad(bytes(blob))
         if slot is not None and 0 <= slot < len(blobs):
             # The line's text is replaced; what follows its NUL (retail's variant bytes, e.g.
             # Maat 93's trailing 07) is kept, so a recompiled retail line is byte-identical.
+            # The terminator is the last NUL (interior NULs are control-code operands:
+            # "Call for \x0c\x00[...]"); from the first one, the line's own text was kept twice.
             old = bytes(blobs[slot])
-            nul = old.find(0)
-            blob = bytes(blob) + (old[nul + 1:] if nul >= 0 else b"")
+            content = _unpad(old)
+            blob = bytes(blob) + (old[len(content) + 1:] if len(content) < len(old) else b"")
             blobs[slot] = blob
             existing.setdefault(key, slot)
             return slot
@@ -2573,11 +2581,26 @@ def _compile_dialog(cutscene: dict, dialog_dat: bytes,
         existing[key] = idx
         return idx
 
-    for i, entry in enumerate(src["lines"]):
+    # A decompiled retail line is named after its message (`m13925`): it reuses that slot. The
+    # remaining slots go to the remaining lines by position (a re-published event of ours).
+    # Positions alone don't line up for a retail event: its lines are sorted by id and the
+    # block holds only what its first stretch of bytecode prints, so Rendezvous Point 966's
+    # main menu (13925) was overwritten with "I'll be going, then."
+    # A retail line outside the block shares its existing entry, never another line's slot.
+    retail: dict[str, Optional[int]] = {}
+    for entry in src["lines"]:
+        m = re.fullmatch(r"m(\d+)", str(entry["id"]))
+        if m:
+            retail[entry["id"]] = int(m.group(1)) if int(m.group(1)) in reuse_block else None
+    positional = [r for r in reuse_block if r not in set(retail.values())]
+    for entry in src["lines"]:
         text = entry["text"]
         if prompt:
             text = _ensure_prompt(text)
-        slot = reuse_block[i] if i < len(reuse_block) else None
+        if entry["id"] in retail:
+            slot = retail[entry["id"]]
+        else:
+            slot = positional.pop(0) if positional else None
         lines = text if isinstance(text, list) else [text]
         if entry.get("paged"):
             joined = "\\v".join(str(t) for t in lines)

@@ -126,3 +126,42 @@ def test_state_selectors_and_aliases():
     assert xi_typed.opcode_for("fade_color", {"entity": "self", "a": 0, "b": 0})[0] == 0x6C
     assert xi_typed.opcode_for("transparency", {"entity": "self", "a": 0, "b": 0})[0] == 0x6C
     assert xi_typed.opcode_for("request_level", {"a": 0, "entity": "self"})[0] == 0x2A
+
+
+def _dialog(*blobs):
+    return xi_dialog.build_container([bytes(b) for b in blobs])
+
+
+def test_dialog_reuse_ignores_padding():
+    """A line matching a retail entry shares it, though retail pads after the terminator."""
+    from xi.event import xi_compile
+    dat = _dialog(b"Hello.\x7f1\x00\x07", b"Bye.\x7f1\x00\x07")
+    cs = {"dialog": {"lines": [{"id": "a", "text": "Bye."}]}}
+    out, ids = xi_compile._compile_dialog(cs, dat)
+    assert ids == {"a": 1} and out == dat
+
+
+def test_dialog_reuse_slots_follow_retail_ids():
+    """A decompiled retail line (`m<id>`) rewrites its own message, never another line's:
+    positional reuse overwrote Rendezvous Point 966's main menu with a farewell line. The
+    kept tail starts after the last NUL (interior NULs are control-code operands)."""
+    from xi.event import xi_compile
+    call = b"Call for \x0c\x00[A/B]?\x07\x0bYes.\x07Not now.\x7f1"
+    dat = _dialog(b"x\x00", call + b"\x00\x07", b"What do you say?\x7f1\x00\x07", b"See you.\x7f1\x00\x07")
+    cs = {"dialog": {"lines": [{"id": "m1", "text": D.render_authoring(call + b"\x00")},
+                               {"id": "m3", "text": "See you."},
+                               {"id": "m2", "text": "What do you say?"}]}}
+    out, ids = xi_compile._compile_dialog(cs, dat, reuse_block=[1, 2])
+    assert ids == {"m1": 1, "m3": 3, "m2": 2}
+    assert out == dat
+
+
+def test_recompile_keeps_retail_dialog(root):
+    """Recompiling a retail event as decompiled leaves the zone's dialog DAT byte-identical
+    (Aht Urhgan Whitegate's Rendezvous Point: 600 lines, menus with interior NULs)."""
+    from xi.event import xi_compile, xi_explain as ex
+    cs, _ = D.decompile_event(root, 50, 0x0103226A, 966)
+    zf = ex.zone_files(root, [50])[0]
+    ev, dl = D._pristine(zf.event), D._pristine(zf.dialog)
+    res = xi_compile.compile_cutscene(cs, ev, dl, ffxi_dir=root)
+    assert res.dialog_dat == dl
