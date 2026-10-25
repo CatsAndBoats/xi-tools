@@ -104,7 +104,10 @@ records what the build changed. See [zone_events.md](zone_events.md). With `even
 retail id the event replaces retail's copy on that actor (same slot, new bytes appended to the
 actor's scene). With `"eventId": "auto"` a new event id is allocated and kept on rebuilds. The
 decompiler lists every NPC the event involves in the cast, and a rewritten line keeps its retail
-tail, so an unedited recompile changes only the owner's block. Every DAT a build touches keeps
+tail, so an unedited recompile changes only the owner's block and leaves the dialog DAT
+byte-identical. A line named after its retail message (`m13925`) rewrites only that message, and
+any line whose text is already in the table shares that entry (retail's padding after the
+terminator is ignored), so an edit adds only its new lines. Every DAT a build touches keeps
 a pristine `<dat>.base` next to it. The decompiler and the checker read the `.base` copies by
 default, so your edits never contaminate the reference (`decompile --installed` reads the live
 DAT when you want to inspect your own event).
